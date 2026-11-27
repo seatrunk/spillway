@@ -33,7 +33,7 @@ note 00248  a jedi djjba  abidbeeedf ahbbejbifibcbjdeigieac jb cbddb gd
 note 00249 bbhfchgejbeacehdahdieb cjgjggjgahghiedjchedegi adghibdbej  b
 ```
 
-**Recovering the exact error slice** (requires an `enforce`-mode capture to write the artifact; `shadow` stores no artifacts):
+**Recovering the exact error slice** (requires an `enforce`-mode capture to write the artifact; `shadow` stores no artifacts; if the capture used a custom `--log-dir` or `SPILLWAY_LOG_DIR`, pass the same directory to `spillway read`):
 
 ```sh
 spillway read 1a6f9b8a0e5837c8385d86fb0a1929f6e3fbee36a7566b38b902070770fdeb25 --offset 19250 --limit 64
@@ -82,11 +82,14 @@ git clone https://github.com/seatrunk/spillway && cd spillway && pip install .
 
 ### Shell wrapper
 
+`spillway run` passes straight through when stdin is an interactive TTY, so agent/non-TTY runs (or `</dev/null` when testing interactively) are what get measured or budgeted:
+
 ```sh
-spillway run -- pytest -x                              # shadow (default): unchanged output + receipt
-spillway run --mode enforce --cap 16384 -- pytest -x   # enforce: bounded preview + stored artifact
-spillway read <sha256> --offset 0 --limit 8192         # recover a slice from an enforce capture
-spillway stats                                         # summarize receipts.jsonl
+spillway run -- pytest -x </dev/null                            # shadow (default): unchanged output + receipt
+spillway run --mode enforce --cap 16384 -- pytest -x </dev/null # experimental enforce trial: preview + artifact
+# Copy the 64-char sha256 from the [spillway preview] header into $SHA256:
+spillway read "$SHA256" --offset 0 --limit 8192                 # recover a slice (same --log-dir / SPILLWAY_LOG_DIR)
+spillway stats                                                  # summarize receipts.jsonl
 ```
 
 ### MCP stdio proxy
@@ -136,8 +139,8 @@ outs = spillway.finalize_batch(
 ## Security and privacy
 
 - **Unredacted `enforce` artifacts with strict permissions:** `enforce` writes the **complete, unredacted** output of cut results to `artifacts/<sha256>.txt` (which may contain secrets or PII); files are created `0600` in `0700` directories with `O_NOFOLLOW` (refusing symlinks and non-regular files) and bounded retention (200 files / 100 MiB default).
-- **Keep `SPILLWAY_LOG_DIR` outside repositories:** never point `SPILLWAY_LOG_DIR` inside a repo or commit/share `artifacts/` or `*.jsonl`; `shadow` writes no artifacts, and receipts never store raw output bodies (see [receipt fields](docs/design.md#receipt-fields)).
-- **Fail-open adapters, fail-closed verifier:** the MCP proxy and `spillway run` **fail open** on internal errors so original tool output passes through untouched; the independent core verifier **fails closed** on a receipt or invariant mismatch with a bounded fail-closed marker.
+- **Keep `SPILLWAY_LOG_DIR` outside repositories:** never point `SPILLWAY_LOG_DIR` inside a repo or commit/share `artifacts/` or `*.jsonl`; `shadow` writes no artifacts, and both shell and MCP receipts record counts instead of result text or file paths, though `receipts.jsonl` still logs operational metadata (such as MCP tool names, sizes, hashes, exit codes, and timestamps — see [receipt fields](docs/design.md#receipt-fields)) and should remain local-only.
+- **Fail-open adapters, fail-closed verifier:** on internal budgeting or rewriting errors, the MCP proxy and `spillway run` **fail open** to the original tool output (transport, I/O, and child-process failures still apply, and MCP recovery failures return a bounded error response); the independent core verifier **fails closed** on a receipt or invariant mismatch with a bounded fail-closed marker.
 - **Vulnerability reporting:** report issues privately via [SECURITY.md](SECURITY.md) (Spillway is not a sandbox and does not protect against other processes running as the same UID).
 
 ## Docs
