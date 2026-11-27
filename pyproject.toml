@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spillway"
-version = "0.4.0"
-description = "Verifiable fidelity-first tool-output budgeting, recovery artifacts, and MCP/Hermes adapters."
+version = "0.5.0"
+description = "Verifiable fidelity-first tool-output budgeting, recovery artifacts, and an MCP proxy."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -26,8 +26,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/seatrunk/context-budget-guard"
-Issues = "https://github.com/seatrunk/context-budget-guard/issues"
+Repository = "https://github.com/seatrunk/spillway"
+Issues = "https://github.com/seatrunk/spillway/issues"
 
 [project.scripts]
 spillway = "spillway.cli:main"

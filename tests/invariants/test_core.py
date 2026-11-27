@@ -265,14 +265,14 @@ class IssuesAndV04Fixes(unittest.TestCase):
         self.assertTrue(all(not o.receipt["aggregate_unsatisfiable"] for o in outs))
 
     def test_json_escaped_traceback_and_extended_facts(self):
-        hermes_tb = json.dumps({
+        json_tb = json.dumps({
             "output": (
                 "x" * 20000
                 + '\nTraceback (most recent call last):\n  File "src/app.py", line 42, in main\nValueError: boom\n'
             ),
             "exit_code": 1,
         })
-        self.assertEqual(error_locations(hermes_tb), ["src/app.py:42"])
+        self.assertEqual(error_locations(json_tb), ["src/app.py:42"])
         ext_text = "Makefile:19: recipe failed\nui/App.svelte:88:3: warn\nsrc/main.zig:14:9: error"
         self.assertEqual(error_locations(ext_text), ["Makefile:19", "ui/App.svelte:88", "src/main.zig:14"])
         clue_log = "INFO starting\n" * 1500 + "FATAL: password authentication failed for role 'app'\n" + "INFO done\n" * 1500

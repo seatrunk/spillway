@@ -1,5 +1,7 @@
 # Combined #6–#9 assessment and delivery-support review
 
+> **Historical record (retired in v0.5.0).** This review concerns a private native-runtime candidate that is no longer a project target. It is kept as evidence only and does not describe the current `spillway` code. See [project status](../project-status.md).
+
 **Status: BLOCKED — review handoff, not a runtime release.** Snapshot through November 4, 2026 at 02:25 UTC (November 3 in UTC−03). This report publishes progress and retained failures for another reviewer to propose modifications. It does not select a new ownership contract, authorize repairs, close issues, or approve activation.
 
 The [machine-readable summary](2026-11-04-combined-assessment.json) contains the corresponding fingerprints and attributed outcomes. The [earlier protected-note rejection](2026-11-03-protected-notes.md) remains historical evidence; it is not the latest candidate.
@@ -18,10 +20,10 @@ All four issues reached independent **scoped approval** in isolated checkpoints.
 
 | Issue | Scoped progress | Frozen tree | Boundary |
 | --- | --- | --- | --- |
-| [#6](https://github.com/seatrunk/context-budget-guard/issues/6) | Corrective rendered-byte accounting and status serialization; permanent boundary tests | `f8183457faa4ba8404ebef5aa07d02bcbd5bde03` | Approval covers the narrow correction, not every inherited fallback |
-| [#7](https://github.com/seatrunk/context-budget-guard/issues/7) | Preserve committed approved-read presentation without reusing the receipt; repair proof consumption to check row identity first | `219341fb26c4a262afb2e6c145e6194974048352` | Separate sibling of #8; still needed compatibility with #9 |
-| [#8](https://github.com/seatrunk/context-budget-guard/issues/8) | Encode actual queued notice delimiters; recover exact emitted JSON archive pointers, including literal/entity path distinctions | `7399d18b675b621c216fceb624ac3e5c9becea6e` | Scoped framing/recovery approval; inherited fallback risks retained |
-| [#9](https://github.com/seatrunk/context-budget-guard/issues/9) | Bind the actual operation owner through policy, redaction, writers and downstream budgeting; distinguish pending/delivered ownership and preserve grant rotation | `089e068a528b6f018ed9c3356ec9e11c9d75f139` | Inherits #8, not #7; pending-state and repeated-failure limits disclosed |
+| [#6](https://github.com/seatrunk/spillway/issues/6) | Corrective rendered-byte accounting and status serialization; permanent boundary tests | `f8183457faa4ba8404ebef5aa07d02bcbd5bde03` | Approval covers the narrow correction, not every inherited fallback |
+| [#7](https://github.com/seatrunk/spillway/issues/7) | Preserve committed approved-read presentation without reusing the receipt; repair proof consumption to check row identity first | `219341fb26c4a262afb2e6c145e6194974048352` | Separate sibling of #8; still needed compatibility with #9 |
+| [#8](https://github.com/seatrunk/spillway/issues/8) | Encode actual queued notice delimiters; recover exact emitted JSON archive pointers, including literal/entity path distinctions | `7399d18b675b621c216fceb624ac3e5c9becea6e` | Scoped framing/recovery approval; inherited fallback risks retained |
+| [#9](https://github.com/seatrunk/spillway/issues/9) | Bind the actual operation owner through policy, redaction, writers and downstream budgeting; distinguish pending/delivered ownership and preserve grant rotation | `089e068a528b6f018ed9c3356ec9e11c9d75f139` | Inherits #8, not #7; pending-state and repeated-failure limits disclosed |
 
 The composite began from frozen #9 and integrated #7 without modifying the frozen predecessors. It retained all 34 inherited feature paths. Three production modules changed during integration: `agent/context_budget_guard.py`, `agent/context_budget_notes.py`, and `agent/context_budget_note_policy.py`. Both approved #7 test files were copied byte-for-byte; two composite test files were added. The sealed composite has 38 changed paths in total.
 
@@ -89,7 +91,7 @@ These six red probes are retained separately from the seven product failures. Th
 Only use this after obtaining the exact separate candidate and preparing an isolated interpreter via the upstream-managed workflow. The placeholder is not an installed interpreter path; these files do not exist in this documentation-only repository.
 
 ```sh
-env -u __HERMES_ACTIVATED HERMES_PYTHON='<managed-test-python>' \
+env PYTHON='<managed-test-python>' \
   scripts/run_tests.sh \
   tests/agent/test_context_budget_approved_reads.py \
   tests/agent/test_context_budget_composite_fallbacks.py \

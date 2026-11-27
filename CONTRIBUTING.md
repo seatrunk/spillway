@@ -1,6 +1,6 @@
 # Contributing
 
-Start with [project status](docs/project-status.md). This repository ships the `spillway` Python package (pure core, artifact store, MCP proxy, CLI), a Hermes plugin, the offline replay and the review/benchmark documentation. The private native Hermes patch is not here. Keep proposals small enough to review without a private session dump.
+Start with [project status](docs/project-status.md). This repository ships the `spillway` Python package (pure core, artifact store, MCP proxy, CLI), the offline replay, a local real-session replay and the review/benchmark documentation. Keep proposals small enough to review without a private session dump.
 
 ## Pick a useful change
 
@@ -22,7 +22,9 @@ python3 benchmarks/replay/replay.py --out /tmp/offline-replay.json && cmp /tmp/o
 python3 scripts/validate_benchmark.py benchmarks/results/2026-11-02-off-baseline.json
 ```
 
-If a change intentionally alters model-visible output, regenerate `benchmarks/replay/results/offline-replay.json`, explain the byte/oracle delta in the PR, and add a [CHANGELOG](CHANGELOG.md) entry. Keep the version in `pyproject.toml`, `spillway/__init__.py`, `adapters/hermes/spillway/plugin.yaml` and `CHANGELOG.md` in sync (`check_repo.py` enforces it). The budgeting modules must stay free of I/O; filesystem access belongs in `spillway/artifacts.py`.
+If a change intentionally alters model-visible output, regenerate `benchmarks/replay/results/offline-replay.json`, explain the byte/oracle delta in the PR, and add a [CHANGELOG](CHANGELOG.md) entry. Keep the version in `pyproject.toml`, `spillway/__init__.py` and `CHANGELOG.md` in sync (`check_repo.py` enforces it). The budgeting modules must stay free of I/O; filesystem access belongs in `spillway/artifacts.py`.
+
+To measure the core on your own agent transcripts, run `python3 benchmarks/real/real_replay.py` ([details](benchmarks/real/README.md)). It prints aggregate numbers only; never commit its output or paste transcript text into an issue or PR.
 
 Check local links and report actual outcomes in the PR template. Describe benchmark impact even when it is “none.” Read [benchmarking](docs/benchmarking.md) before adding measurements. Do not rewrite an existing result to manufacture a comparison.
 

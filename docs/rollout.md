@@ -1,22 +1,20 @@
 # Rollout gates
 
-Production activation is currently **BLOCKED**. Since PR #14 this repository ships the core (now the `spillway` package, v0.4.0) plus a Hermes plugin and an MCP proxy that default to `shadow` (receipts only, output unchanged). Installing them in shadow mode is observation, not activation. Their `enforce` mode and the private native patch both stay behind the gates below.
+Production activation is currently **BLOCKED**. This repository ships the core (the `spillway` package, v0.5.0) and an MCP proxy that defaults to `shadow` (receipts only, output unchanged). Running the proxy in shadow mode is observation, not activation. Its `enforce` mode stays behind the gates below. The Hermes plugin and the private native-runtime track were retired in v0.5.0, so their gates are gone.
 
-Before any `enforce` trial or native runtime trial:
+Before any `enforce` trial:
 
 - Run the real-task benchmark from the README: shadow receipts first, then paired A/B enforce runs, with no fidelity-oracle regressions.
-- Pass the Stage 2 native combined gate on the exact native candidate, then independent review. Core tests and the offline replay (candidate 62/62 in v0.4.0) do not replace it.
-
-- Resolve the missing short plugin/LSP note after aggregate spill. Add a synthetic regression and inspect model-visible output.
-- Resolve the latest [combined assessment blockers](reviews/2026-11-04-combined-assessment.md): rotated-session re-budgeting, exact ownership of withheld notice presentations, and repeated settlement while dependencies remain failed. Individual #6–#9 approvals do not establish compatibility.
-- Repair and independently re-review the separate delivery-support verifier: untracked import shadowing and index-flag-hidden inherited changes currently defeat its intended candidate-identity checks. Validate the actual exported payload, public-pin materialization, managed PM setup and native CI; none is established by documentation/tooling CI.
+- Get independent review of the exact `enforce` candidate. Core tests and the offline replay (candidate 62/62) do not replace it.
+- Resolve the open note-handling issues (#1, #3–#9) or re-scope them for the current stack, adding a synthetic regression for each and inspecting the model-visible output.
+- Run the local [real-session replay](../benchmarks/real/README.md) on the target harnesses and read the aggregate fidelity numbers. It is a measurement of the core, not an approval.
 - Verify every [design invariant](design.md), including mandatory exceptions, valid media, failure metadata, artifact privacy, and cached profile/session behavior.
-- Record the exact base revision and patch SHA-256. Obtain independent review of that exact candidate; test totals alone cannot grant approval.
+- Record the exact revision under review. Test totals alone cannot grant approval.
 - Agree on explicit human authorization, isolated synthetic trial scope, stop conditions, and a tested rollback to the prior configuration. Do not use private live transcripts as fixtures.
-- Re-run applicable integration checks on the candidate. Distinguish those checks from this repository's CI and record unresolved limitations.
+- Re-run applicable integration checks against the real host. Distinguish those checks from this repository's CI and record unresolved limitations.
 
 Stop if necessary notes disappear, artifacts expose private content, media/control content breaks, failure semantics change, or the reviewed fingerprint differs. Revert the trial through the agreed rollback and verify the resulting state. A fresh patch requires fresh review.
 
-Offline, no-provider replay in an approved isolated checkout may characterize a rejected candidate's failures. It is not a live trial or readiness approval. Task-based model experiments, conversation-compaction interactions, paid usage, and any production canary require separate scope and authorization. See the proposed [evaluation protocol](multi-codebase-evaluation.md).
+Offline, no-provider replay may characterize a candidate's failures. It is not a live trial or readiness approval. Task-based model experiments, conversation-compaction interactions, paid usage, and any production canary require separate scope and authorization. See the proposed [evaluation protocol](multi-codebase-evaluation.md).
 
-Do not restart services, enable profiles, or claim deployment from this checklist. See [project status](project-status.md) for Stage 1 and the rejected native candidate and [benchmarking](benchmarking.md) for what the off-only evidence can establish.
+Do not restart services, enable profiles, or claim deployment from this checklist. See [project status](project-status.md) for the current state and [benchmarking](benchmarking.md) for what the off-only evidence can establish.

@@ -17,12 +17,11 @@ REQUIRED = ["README.md", "CHANGELOG.md", "pyproject.toml", "LICENSE", "SKILL.md"
 
 
 def _version_errors():
-    """The package, pyproject, Hermes manifest and CHANGELOG must agree on one version."""
+    """The package, pyproject and CHANGELOG must agree on one version."""
     found = {}
     sources = {
         "pyproject.toml": (ROOT / "pyproject.toml", r'^version\s*=\s*"([^"]+)"'),
         "spillway/__init__.py": (ROOT / "spillway/__init__.py", r'^__version__\s*=\s*"([^"]+)"'),
-        "adapters/hermes/spillway/plugin.yaml": (ROOT / "adapters/hermes/spillway/plugin.yaml", r'^version:\s*"?([^"\s]+)"?'),
         "CHANGELOG.md": (ROOT / "CHANGELOG.md", r"^## \[?(\d+\.\d+\.\d+)\]?"),
     }
     for label, (path, pattern) in sources.items():
@@ -65,8 +64,10 @@ def check():
         except (ValueError, TypeError, OverflowError, RecursionError):
             errors.append(str(path.relative_to(ROOT)) + ": invalid or unsanitized report")
     errors.extend(_version_errors())
-    for path in list((ROOT / "spillway").glob("*.py")) + [ROOT / "adapters/hermes/spillway/__init__.py"]:
-        if path.is_file() and re.search(r"^\s*(?:from|import)\s+(?:cbg|adapters)\b", path.read_text(encoding="utf-8"), re.M):
+    if (ROOT / "adapters/hermes").exists():
+        errors.append("adapters/hermes: the Hermes adapter was retired in 0.5.0 and must not come back")
+    for path in (ROOT / "spillway").glob("*.py"):
+        if re.search(r"^\s*(?:from|import)\s+(?:cbg|adapters)\b", path.read_text(encoding="utf-8"), re.M):
             errors.append(str(path.relative_to(ROOT)) + ": imports legacy/top-level adapters package")
     skill = ROOT / "SKILL.md"
     if skill.exists():
