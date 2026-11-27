@@ -2,6 +2,17 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the major version is 0, minor versions may change the model-visible contract.
 
+## [Unreleased]
+
+### Added
+
+- **`spillway run [--mode shadow|enforce] [--cap N] [--log-dir DIR] -- CMD [ARGS...]`:** a shell entry point for agents without an MCP client. It runs the command without a shell, merges stdout and stderr in arrival order and exits with the command's exit code (128+N after a signal). `shadow` (default) prints the original bytes and writes a receipt; `enforce` prints the budgeted preview and stores the original in the artifact store. The command's exit code and `file:line` locations feed the same per-result budget as the MCP proxy. `enforce` remains not production-approved.
+- **`spillway read SHA256 [--offset N] [--limit N] [--log-dir DIR]`:** prints one neutralized, UTF-8-safe slice of a stored artifact with a `next_offset`/`eof` footer; exits 2 with a short error for an invalid or missing sha256, a symlink or a non-regular file.
+- **Receipt `source` field and `read` events:** shell receipts carry `"source": "shell"`; each `spillway read` appends `{"event": "read", ...}`. Receipts without `source` still parse and count as `mcp`.
+- **`spillway stats`:** reports `by_source`, `reads`, `shell_enforced_spilled`, `shell_enforced_recovered` and `recovery_rate` (share of enforced shell results whose artifact was read later).
+
+The MCP path, the core and `benchmarks/replay/results/offline-replay.json` are unchanged.
+
 ## [0.5.0] — 2026-11-26
 
 Spillway is re-targeted to the current stack: T3 Code driving Claude Code, Codex and Antigravity (`agy`), plus OpenBot. The Hermes runtime is no longer used, so its adapter and its private native-runtime track are retired. The pure core and the MCP proxy are unchanged: model-visible output is byte-for-byte what 0.4.0 produced, and the offline replay result is identical.
