@@ -1,72 +1,97 @@
 # Spillway
 
-![Spillway — less noise, keep the clues. A large tool result becomes a bounded preview with preserved diagnostics and a recoverable artifact.](docs/assets/hero.svg)
-
 [![CI](https://github.com/seatrunk/spillway/actions/workflows/ci.yml/badge.svg)](https://github.com/seatrunk/spillway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
+![Zero runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-zero-brightgreen.svg)
 
-**Spillway caps oversized tool output for LLM agents without losing the clue that matters.** A compiler dump, a 5,000-line log or a giant JSON response is turned into a bounded preview. The exit code, error locations and runtime notes are kept, and the complete original is saved privately so the agent can read it back page by page.
+**Cap oversized tool output for LLM agents without losing the clues that matter.** Spillway turns huge build logs, tracebacks, and tool payloads into bounded previews that keep exit codes, `file:line` locations, and head/tail context while saving the complete original locally for paginated recovery.
 
-Think of a dam spillway. Normal flow passes untouched. During a surge the crest height is enforced, and the overflow is diverted to a basin instead of breaking things downstream.
+> **Status: experimental (`v0.5.0`).** Defaults to **`shadow`** (measures and logs; original output passes through unchanged). **`enforce` is experimental and not production-approved** — see [rollout gates](docs/rollout.md) and [project status](docs/project-status.md).
 
-> **Status: experimental (v0.5.0).** The core and the MCP proxy work, are tested, and default to **`shadow`**: they measure and log, and the model sees the original output. **`enforce` is not production-approved.** See [rollout gates](docs/rollout.md) and [project status](docs/project-status.md). Previously named *Context Budget Guard* (`cbg`); see [migration](#migrating-from-cbg).
+## Before and after
 
-**[Why](#why) · [What the model sees](#what-the-model-sees) · [Quick start](#quick-start) · [Configuration](#configuration) · [Recovery](#recovering-spilled-output) · [How it works](#how-it-works) · [Evidence](#evidence) · [Security](#security-and-privacy) · [Development](#development)**
+Synthetic Rust build failure from [`benchmarks/replay/fixtures/rust_cargo_mid.json`](benchmarks/replay/fixtures/rust_cargo_mid.json): **37,315 bytes, 502 lines**, `exit_code=101`, capped here at **640 bytes** (default cap is 16,384 bytes).
 
----
-
-## Why
-
-Simple truncation helps you hit a size target, but it often cuts the wrong part: the exit code at the end, the `src/lib.rs:12` in the middle, or the plugin note that was attached after the cut. Spillway keeps fidelity first and makes size the second goal:
-
-| Always kept in view | Kept recoverable | Never traded away |
-| --- | --- | --- |
-| Head and tail preview, `exit_code`, up to 5 `file:line` locations (or short `ERROR`/`panic` clues), call-owned notes | Full unredacted original in `artifacts/<sha256>.txt` (0600), read by offset/limit | One genuine `<untrusted_tool_result>` wrapper, media order, mandatory control content, approved-read receipts |
-
-It is **not** conversation summarization, a token or cost cap, or a sandbox. It bounds individual tool results and tool-result batches.
-
-## What the model sees
-
-A 29,490-byte `cargo build` failure capped at 640 bytes (the default cap is 16,384):
+**Plain head truncation at 640 B (excerpt)** — cuts mid-line at `Compiling 00008 dddifhag` and drops `exit_code=101`, `error[E0308]`, and `crates/store/src/lib.rs:88`:
 
 ```text
-<untrusted_tool_result>
-[spillway preview] original 29490 bytes, 1104 lines; exit_code=101; errors: src/lib.rs:12; artifact sha256=8813b5fa…3101 (read with offset/limit)
-   Compiling crate000 v0.1.0
-   Compiling crate001 v0.1.0
-   …
-[...]
-note: detail 198
-note: detail 199
-error: could not compile `demo`
-exit code: 101
-</untrusted_tool_result>
+Compiling 00000 ehbg fjji bafeghcichgecechdfdej abecbdfg cghgbiehcdcebdgdbbf
+Compiling 00001 fheacfgdcgjgaffgcdcbahhd aggifad baedaceeibbiaeigdjjfjciaiec
+... (lines 00002-00007 omitted) ...
+Compiling 00008 dddifhag
 ```
 
-(The real header carries the full 64-character SHA-256; it is shortened here.)
+**Spillway preview at 640 B (`spillway run --mode enforce --cap 640`, exact output)** — retains `exit_code=101`, `crates/store/src/lib.rs:88`, original bytes/lines, SHA-256, and line-aligned head/tail:
 
-- The **header** is built from the full output, so the facts survive whatever is cut.
-- The **head and tail** are cut on UTF-8 and line boundaries. Line-limited reads get only a head, and it gets the whole byte budget.
-- Text inside the result that imitates `[spillway …]`, `[note:…]` or the wrapper tags is neutralized, so tool output cannot forge a header.
-- Results that fit pass through unchanged (`mode: full`).
+```text
+[spillway preview] original 37315 bytes, 502 lines; exit_code=101; errors: crates/store/src/lib.rs:88; artifact sha256=1a6f9b8a0e5837c8385d86fb0a1929f6e3fbee36a7566b38b902070770fdeb25 (recover: spillway read <sha256> --offset N --limit N)
+Compiling 00000 ehbg fjji bafeghcichgecechdfdej abecbdfg cghgbiehcdcebdgdbbf
+Compiling 00001 fheacfgdcgjgaffgcdcbahhd aggifad baedaceeibbiaeigdjjfjciaiec
+[...]
+note 00248  a jedi djjba  abidbeeedf ahbbejbifibcbjdeigieac jb cbddb gd
+note 00249 bbhfchgejbeacehdahdieb cjgjggjgahghiedjchedegi adghibdbej  b
+```
+
+**Recovering the exact error slice** (requires an `enforce`-mode capture to write the artifact; `shadow` stores no artifacts):
+
+```sh
+spillway read 1a6f9b8a0e5837c8385d86fb0a1929f6e3fbee36a7566b38b902070770fdeb25 --offset 19250 --limit 64
+```
+
+```text
+error[E0308]: mismatched types
+ --> crates/store/src/lib.rs:88:9
+[spillway read] sha256=1a6f9b8a0e5837c8385d86fb0a1929f6e3fbee36a7566b38b902070770fdeb25 offset=19250 next_offset=19314 total_bytes=37315 eof=false
+```
+
+In MCP `enforce` mode, the proxy exposes `spillway_read_artifact` (`{"sha256": "1a6f9b8a0e5837c8385d86fb0a1929f6e3fbee36a7566b38b902070770fdeb25", "offset": 19250, "limit": 64}`) so clients can fetch the same UTF-8-safe, neutralized slice without filesystem access.
+
+## Evidence
+
+### Real-session replay
+
+Aggregate replay from [PR #23](https://github.com/seatrunk/spillway/pull/23) over **737 recorded shell and file-read tool results** from Claude Code, Codex, and Antigravity on one machine (**0 model calls** during replay; 2,447,196 B unbudgeted):
+
+| Cap | Arm | Bytes saved | Results keeping all `file:line` refs | `file:line` refs kept | Exit codes kept |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 4 KiB | `truncate` (head cut) | 47.3% | 56 / 88 | 176 / 291 | 129 / 129 |
+| 4 KiB | **`spillway`** | **48.0%** | **81 / 88** | **282 / 291** | **129 / 129** |
+| 8 KiB | `truncate` (head cut) | 27.7% | 67 / 88 | 212 / 291 | 129 / 129 |
+| 8 KiB | **`spillway`** | **28.0%** | **86 / 88** | **288 / 291** | **129 / 129** |
+
+This measures **bytes and diagnostic fidelity only** — not token counts, USD cost, or task success rate — and does not approve `enforce` for production. Exit codes stayed at 129/129 in both arms because those harnesses print exit codes at the top of output. Run the aggregate-only replay on your own transcripts with [`benchmarks/real/README.md`](benchmarks/real/README.md).
+
+### Offline synthetic replay
+
+Separately, the deterministic offline suite ([`benchmarks/replay/README.md`](benchmarks/replay/README.md), committed baseline in [`benchmarks/replay/results/offline-replay.json`](benchmarks/replay/results/offline-replay.json)) runs **12 synthetic cases** with 0 model calls and independent ground-truth oracles: **Spillway (`candidate`) passes 62/62** (146,175 B) vs emulated `historical` **43/62** (163,871 B) and unbudgeted `none` **46/62** (297,924 B). Reproduce without modifying tracked files:
+
+```sh
+python3 benchmarks/replay/replay.py --out /tmp/offline-replay.json && cmp /tmp/offline-replay.json benchmarks/replay/results/offline-replay.json
+```
 
 ## Quick start
 
-Requires Python 3.11+ and nothing else.
+Requires Python 3.11+ with zero runtime dependencies. Spillway is not published on PyPI.
 
 ```sh
-git clone https://github.com/seatrunk/spillway spillway && cd spillway
-pip install .            # or: pipx install .   — provides the `spillway` command
-spillway --version
+pipx install git+https://github.com/seatrunk/spillway
+# or from a local checkout:
+git clone https://github.com/seatrunk/spillway && cd spillway && pip install .
 ```
 
-Or install straight from Git: `pipx install git+https://github.com/seatrunk/spillway`. Spillway is not published on PyPI.
+### Shell wrapper
 
-### 1. Wrap any MCP server
+```sh
+spillway run -- pytest -x                              # shadow (default): unchanged output + receipt
+spillway run --mode enforce --cap 16384 -- pytest -x   # enforce: bounded preview + stored artifact
+spillway read <sha256> --offset 0 --limit 8192         # recover a slice from an enforce capture
+spillway stats                                         # summarize receipts.jsonl
+```
 
-Put `spillway mcp` in front of the server command in your MCP client configuration:
+### MCP stdio proxy
+
+Wrap any MCP server in your client configuration (defaults to `shadow`):
 
 ```json
 {
@@ -79,195 +104,59 @@ Put `spillway mcp` in front of the server command in your MCP client configurati
 }
 ```
 
-- **`shadow`** (the default): every response passes through byte for byte. One content-free receipt per `tools/call` is appended to `~/.cache/spillway/receipts.jsonl`.
-- **`enforce`**: oversized `tools/call` results become previews. `isError` and media are kept, and `structuredContent` is dropped from cut responses because it would bypass the cap. The original is saved under `artifacts/`, and a `spillway_read_artifact` tool is added to `tools/list` for recovery.
-- **`off`**: plain passthrough. No files are written.
+### Python library
 
-Without installing: `python3 adapters/mcp_proxy/proxy.py [options] -- <server command>`.
-
-### 2. Wrap a shell command
-
-For agents without an MCP client (or for any command whose output you want to budget), put `spillway run` in front of the command:
-
-```sh
-spillway run -- pytest -x                                   # shadow (default): output unchanged, receipt written
-spillway run --mode enforce --cap 16384 -- pytest -x        # enforce: oversized output becomes a preview
-```
-
-The command runs without a shell (argv exactly as given), stdout and stderr are merged in arrival order, and `spillway run` exits with the command's exit code (128+N if a signal killed it; 127 if it is not found). The exit code and `file:line` locations are fed to the same budget the MCP proxy uses.
-
-- **`shadow`** (default): prints the original output byte for byte and appends one content-free receipt (`"source": "shell"`, with `would_change`) to `receipts.jsonl`. Like the MCP proxy, it stores no artifact.
-- **`enforce`**: prints the preview (header with the artifact sha256, head, tail) and stores the original under `artifacts/` (0600, content-addressed, pruned on write). Output that fits the cap is printed unchanged. If anything inside Spillway fails, or the core cannot produce a verified preview that carries the artifact sha256 (for example a very small `--cap`), the original output is printed and no artifact is stored.
-
-Operational behavior:
-
-- **Terminal on stdin:** with a terminal on stdin (an interactive human session; agents almost never have one), `spillway run` replaces itself with the command, in either mode: nothing is measured, stored or recorded, and the command's exit status is unchanged.
-- **Signals:** SIGINT and SIGTERM sent to `spillway run` are forwarded to the command. The command runs in its own process group and the whole group receives the signal. The exit status follows the command (130 or 143 after those signals), and the command is always reaped.
-- **Memory bound:** at most `--max-capture-bytes` (default 16 MiB, or `SPILLWAY_MAX_CAPTURE_BYTES`) are held in memory. Beyond that, output streams through unchanged and unbudgeted, with no receipt and no artifact, and the exit status is still the command's.
-- **Output errors:** if stdout cannot be written (full disk, closed pipe), `spillway run` prints one line to stderr, still drains and reaps the command, and exits with the command's status.
-- **Privacy:** shell receipts keep sizes, hashes, mode, exit code and counts (`error_location_count`, `diagnostic_clue_count`). They never contain output text, paths or clue lines, although the model-visible preview does.
-
-`enforce` is **not production-approved**: it stays behind the [rollout gates](docs/rollout.md). Do not add it to real agent profiles or hooks until those gates are met. Use `shadow` to measure first.
-
-Without a cap flag the cap is `SPILLWAY_RESULT_CAP` or 16,384 bytes, and `--log-dir` defaults to `SPILLWAY_LOG_DIR` or `~/.cache/spillway`. With `--wrap-untrusted`, enforced output is wrapped in `<untrusted_tool_result>` and neutralized, including results that fit the cap; without it, results that fit are printed exactly as the command wrote them.
-
-### 3. Library
+The budgeting core does zero I/O; filesystem storage lives in [`spillway/artifacts.py`](spillway/artifacts.py).
 
 ```python
 import spillway
 
-out = spillway.apply_budget("call-1", huge_text, exit_code=2)
-out.mode                       # "full" | "preview" | "marker" | "withheld" | "failclosed" | "control"
-out.rendered.model_text()      # exactly what the model would see (≤ cap bytes)
-out.receipt                    # content-free, verified receipt (sizes, hashes, facts)
-out.artifact                   # full original when cut (persist it yourself, e.g. ArtifactStore)
+out = spillway.apply_budget("call-1", "x\n" * 10_000, exit_code=2)
+out.mode                   # "preview" (or "full", "marker", "withheld", "failclosed", "control")
+out.rendered.model_text()  # bounded model-visible text (<= 16,384 UTF-8 bytes by default)
+out.receipt                # verified metadata (sizes, hashes, extracted facts)
+out.artifact               # full original when cut (persist via spillway.ArtifactStore)
 
-# A batch with a turn budget: small rows keep their size, big rows shrink first.
 outs = spillway.finalize_batch(
-    [{"call_id": "a", "result": log_a}, {"call_id": "b", "result": log_b}],
+    [{"call_id": "a", "result": "ok"}, {"call_id": "b", "result": "y\n" * 15_000}],
     turn_budget=24_000,
 )
 ```
 
-The budgeting core (`limits`, `render`, `notes`, `sanitize`, `facts`, `budget`, `verify`) does no I/O. All filesystem access lives in [`spillway/artifacts.py`](spillway/artifacts.py).
+<details>
+<summary>Configuration and operational details</summary>
 
-## Configuration
+- **Environment variables / flags:** `SPILLWAY_MODE` (`--mode`, default `shadow`), `SPILLWAY_LOG_DIR` (`--log-dir`, default `~/.cache/spillway`), `SPILLWAY_RESULT_CAP` (`--cap`, default `16384`, floor `256`), `SPILLWAY_WRAP_UNTRUSTED` (`--wrap-untrusted`), `SPILLWAY_MAX_ARTIFACTS` (`--max-artifacts`, default `200`), `SPILLWAY_MAX_ARTIFACT_BYTES` (`--max-artifact-bytes`, default `104857600`), `SPILLWAY_MAX_CAPTURE_BYTES` (`--max-capture-bytes` for `spillway run`, default `16777216`).
+- **Shell behavior:** `spillway run` executes argv without a shell, merges stdout/stderr, preserves the child exit code, forwards `SIGINT`/`SIGTERM` to the child process group, passes straight through when stdin is a TTY, and streams unbudgeted if output exceeds `--max-capture-bytes`.
+- **MCP behavior:** `shadow` is byte-for-byte passthrough; `enforce` caps oversized `tools/call` text, preserves `isError` and media parts, strips `structuredContent` from cut responses, and registers `spillway_read_artifact`. See [`adapters/mcp_proxy/README.md`](adapters/mcp_proxy/README.md).
+- **Housekeeping & receipts:** `spillway prune --log-dir DIR` applies retention limits manually (writes also prune automatically). See [docs/design.md](docs/design.md) for the full pipeline, note ownership, and receipt fields.
 
-| Environment variable | CLI flag (`spillway mcp`) | Default | Meaning |
-| --- | --- | --- | --- |
-| `SPILLWAY_MODE` | `--mode` | `shadow` | `off`, `shadow` or `enforce` |
-| `SPILLWAY_LOG_DIR` | `--log-dir` | `~/.cache/spillway` | Holds `receipts.jsonl`, `errors.jsonl` and `artifacts/` |
-| `SPILLWAY_RESULT_CAP` | `--cap` | `16384` | Per-result cap in UTF-8 bytes; the floor is 256 |
-| `SPILLWAY_WRAP_UNTRUSTED` | `--wrap-untrusted` | off | Keep the `<untrusted_tool_result>` wrapper in the enforced text |
-| `SPILLWAY_MAX_ARTIFACTS` | `--max-artifacts` | `200` | Retention: maximum number of artifact files (oldest are evicted first) |
-| `SPILLWAY_MAX_ARTIFACT_BYTES` | `--max-artifact-bytes` | `104857600` | Retention: maximum total artifact bytes |
-| `SPILLWAY_MAX_CAPTURE_BYTES` | `--max-capture-bytes` (`spillway run`) | `16777216` | Output bytes held in memory before `run` streams through unbudgeted |
-
-The legacy `CBG_MODE`, `CBG_LOG_DIR`, `CBG_RESULT_CAP` are still read when the matching `SPILLWAY_*` variable is unset or empty.
-
-Core defaults (`spillway.Policy`): 16,384 bytes per result; 350 lines for full file reads and 150 for partial reads; notes up to 4,096 bytes each and 8,192 bytes per batch; a floor of 1,024 bytes per row during batch settlement.
-
-## Recovering spilled output
-
-In `enforce` mode, call the added tool `spillway_read_artifact` with `{"sha256": "<64 hex>", "offset": 0, "limit": 8192}`. Each slice is UTF-8 safe, reports `next_offset` and `eof`, and is neutralized like any other tool output. Slices are requested at up to half the cap and shrunk further if needed, so the response always fits.
-From a shell, read a stored original with the CLI (this is what a preview from `spillway run` points to):
-
-```sh
-spillway read <sha256> [--offset N] [--limit N] [--log-dir DIR]
-```
-
-It prints one UTF-8-safe slice (default 8,192 bytes, at most 65,536), neutralized like any tool output, followed by a footer such as `[spillway read] sha256=… offset=0 next_offset=8192 total_bytes=20480 eof=false`. Pass `next_offset` as the next `--offset` until `eof=true`. An invalid sha256, a missing artifact, a symlink or a non-regular file exits 2 with a one-line error. Each successful read appends a content-free `read` event to `receipts.jsonl`, which `spillway stats` uses to report how often spilled originals are needed.
-
-- **Housekeeping:** `spillway prune --log-dir DIR [--max-artifacts N] [--max-bytes B]` applies the retention limits. Writes also prune automatically.
-
-## Receipts and `spillway stats`
-
-Each tool result writes one JSON line to `receipts.jsonl`. It contains no output content: sizes, SHA-256 hashes, mode, exit code, error locations, note IDs, `verified`, `would_change` and `elapsed_us`. Results from `spillway run` carry `"source": "shell"`; receipts without a `source` (the MCP proxy, older versions) are counted as `mcp`. Each `spillway read` adds a `{"event": "read", ...}` line.
-
-```sh
-spillway stats                       # default: $SPILLWAY_LOG_DIR/receipts.jsonl or ~/.cache/spillway/receipts.jsonl
-spillway stats ~/.cache/spillway/receipts.jsonl --json
-```
-
-```text
-results: 412  would_change: 37  not_verified: 0
-bytes:   before=3120044  after=1048213  modes={'full': 375, 'preview': 37}
-reads:   9  shell_enforced_spilled: 30  recovered: 6  recovery_rate: 20.0%  sources={'mcp': 380, 'shell': 32}
-latency: n=412  p50=180us  p95=950us  max=4100us
-```
-
-`recovery_rate` is the share of enforced shell results that were cut (`would_change`) whose artifact was read later, in file order. It is `n/a` until there is such a result.
-
-(Illustrative output. Run `shadow` for a while and read your own numbers before you consider `enforce`.)
-
-The field reference is in [docs/design.md](docs/design.md#receipt-fields).
-
-## How it works
-
-![Tool data passes through per-result and aggregate budgeting into a model-visible preview; additional detail goes to a private artifact; notes stay outside the untrusted wrapper exactly once.](docs/assets/output-flow.svg)
-
-1. **Render and measure exactly.** The final model-visible representation is what gets measured: framing, multimodal JSON escaping and note suffixes included. Measurement is never an estimate.
-2. **Extract facts from the full output.** The exit code, `file:line` locations (Python, TypeScript/MSBuild, GCC, Rust, ESLint, SQL, Make and others, including inside JSON-escaped strings) and fallback error clues.
-3. **Cut per result.** If the rendered result exceeds the cap or its line limit, Spillway builds a header, a head and a tail on UTF-8 and line boundaries, then re-measures until it fits. If no preview fits, it uses a header-only marker.
-4. **Settle the batch.** If a turn budget is exceeded, control rows and approved-read receipts stay fixed. The rest are water-filled: small rows keep their size and the largest rows shrink first. A policy failure withholds bodies but keeps the notes each call owns. Tools are never re-run.
-5. **Verify independently.** [`verify.py`](spillway/verify.py) does not import the budgeting code. It re-parses the final output and checks the byte cap, receipt hash, a single genuine wrapper, the exit code, the locations, and that each note appears exactly once outside the wrapper. Any mismatch replaces the output with a bounded fail-closed marker.
-6. **Track note ownership.** Plugin and LSP notes belong to a call ID and move through `PENDING → DELIVERED → RETIRED`, with bounded state. See [docs/model/notes.md](docs/model/notes.md); 10,000 random sequences are property-tested.
-
-The full design and its invariants are in [docs/design.md](docs/design.md).
-
-## Evidence
-
-Offline replay: 12 synthetic cases, 0 model calls and no network. Each arm is scored by ground-truth oracles that are independent of Spillway's verifier. It is reproducible byte for byte and runs in CI.
-
-| Arm | Model-visible bytes | Oracles passed | Typical failures |
-| --- | ---: | ---: | --- |
-| `none` (no budget) | 297,924 | 46 / 62 | over the cap, aggregate over budget, forged/duplicate wrapper |
-| `historical` (emulated character-based spill) | 163,871 | 43 / 62 | lost exit codes and locations, dropped notes |
-| `candidate` (Spillway) | 146,175 | **62 / 62** | — |
-
-```sh
-python3 benchmarks/replay/replay.py --out /tmp/offline-replay.json
-cmp /tmp/offline-replay.json benchmarks/replay/results/offline-replay.json && echo identical
-```
-
-**What this does not show:** token or cost savings on real tasks, or task success rates. The `historical` arm is an emulation, not the old runtime. A real-task A/B benchmark (shadow first, then paired enforce runs) is the next gate; see [docs/benchmarking.md](docs/benchmarking.md).
+</details>
 
 ## Security and privacy
 
-> In `enforce` mode, `artifacts/<sha256>.txt` holds the **complete, unredacted** output of every cut result. That can include secrets read by the agent (`.env` files, tokens), PII and private code. Spillway redacts nothing.
+- **Unredacted `enforce` artifacts with strict permissions:** `enforce` writes the **complete, unredacted** output of cut results to `artifacts/<sha256>.txt` (which may contain secrets or PII); files are created `0600` in `0700` directories with `O_NOFOLLOW` (refusing symlinks and non-regular files) and bounded retention (200 files / 100 MiB default).
+- **Keep `SPILLWAY_LOG_DIR` outside repositories:** never point `SPILLWAY_LOG_DIR` inside a repo or commit/share `artifacts/` or `*.jsonl`; `shadow` writes no artifacts, and receipts never store raw output bodies (see [receipt fields](docs/design.md#receipt-fields)).
+- **Fail-open adapters, fail-closed verifier:** the MCP proxy and `spillway run` **fail open** on internal errors so original tool output passes through untouched; the independent core verifier **fails closed** on a receipt or invariant mismatch with a bounded fail-closed marker.
+- **Vulnerability reporting:** report issues privately via [SECURITY.md](SECURITY.md) (Spillway is not a sandbox and does not protect against other processes running as the same UID).
 
-- Directories are created 0700 and files 0600. Writes and reads use `O_NOFOLLOW`; symlinks and non-regular files are refused, and artifact names must be valid SHA-256 hex. None of this protects against other processes running as the same UID.
-- Retention is bounded (200 files / 100 MiB by default). Never point `SPILLWAY_LOG_DIR` inside a repository, and never commit or share `artifacts/` or `*.jsonl`.
-- In `shadow` no artifacts are written. Receipts contain no output content, but they do contain tool names and `file:line` locations.
-- The MCP proxy **fails open** on internal errors: the original result goes through. The verifier **fails closed** on a receipt mismatch.
+## Docs
 
-Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
-
-## Project layout
-
-| Path | Contents |
-| --- | --- |
-| [`spillway/`](spillway/__init__.py) | Pure core (`limits`, `render`, `notes`, `sanitize`, `facts`, `budget`, `verify`), plus `artifacts` (I/O), `mcp_proxy`, `shell` and `cli` |
-| [`adapters/mcp_proxy/`](adapters/mcp_proxy/README.md) | Source-checkout shim for `spillway mcp` |
-| [`benchmarks/replay/`](benchmarks/replay/README.md) | Offline three-arm replay, fixtures and committed results |
-| [`benchmarks/real/`](benchmarks/real/README.md) | Local real-session replay over your own agent transcripts; writes aggregate numbers only |
-| [`tests/`](tests/) | Unit, invariant, property, MCP proxy and CLI tests (stdlib `unittest`) |
-| [`docs/`](docs/design.md) | Design, note model, benchmarking, rollout, status and historical reviews |
+- [Design & invariants](docs/design.md) — measurement, fact extraction, batch water-filling, trust boundary, and receipt schema
+- [Benchmarking](docs/benchmarking.md) — evaluation protocol, offline/real-session replay, and published baseline limits
+- [Rollout gates](docs/rollout.md) & [Project status](docs/project-status.md) — what is built and what blocks production `enforce`
+- [Visual guide](docs/visual-guide.html) — architecture and flow diagrams
+- [Contributing](CONTRIBUTING.md) — stdlib-only guidelines, regression tests, and review boundaries
 
 ## Development
 
+Standard library only (Python 3.11+, no dev dependencies):
+
 ```sh
-python3 -m unittest discover -s tests -v       # 77 tests, about 10 s, includes 10,000 property sequences
-python3 scripts/check_repo.py                  # required files, local links, action pins, version consistency
-python3 benchmarks/replay/replay.py            # exits 1 if the candidate fails any oracle
-python3 benchmarks/replay/gen_fixtures.py      # regenerate replay fixtures (deterministic)
+python3 -m unittest discover -s tests -v
+python3 scripts/check_repo.py
 ```
-
-Standard library only, with no dev dependencies. CI runs all of the above, plus the test suite and a wheel-install smoke test on Python 3.11, 3.12 and 3.13, and also gitleaks and zizmor. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. Model-visible contract changes need a regression test and a [CHANGELOG](CHANGELOG.md) entry.
-
-## Roadmap and status
-
-![Promotion roadmap from invariants through isolated build, repair, replay, real-task evaluation and controlled rollout.](docs/assets/roadmap.svg)
-
-- **Done:** the pure core, the MCP proxy, offline replay, artifact recovery, packaging, and a local real-session replay (v0.3.0 to v0.5.0).
-- **Target stack:** T3 Code driving Claude Code, Codex and Antigravity (`agy`), plus OpenBot. Today the MCP proxy covers MCP tool servers, and the real-session replay measures the core against those harnesses' local transcripts. There is no native hook for them yet.
-- **Next:** the real-task benchmark. Run in shadow, then paired A/B enforce runs comparing task success, tokens and cost, recovery reads and fidelity regressions. Protocol: [docs/multi-codebase-evaluation.md](docs/multi-codebase-evaluation.md).
-- **Retired:** the Hermes plugin and the private native-runtime track were dropped in v0.5.0. Their review history stays in [docs/reviews/](docs/reviews/2026-11-04-combined-assessment.md) as a record.
-- **Production `enforce`:** gated by [docs/rollout.md](docs/rollout.md).
-
-The [operating skill](SKILL.md) describes how to review output-budget evidence. The [visual guide](docs/visual-guide.html) collects the diagrams.
-
-## Migrating from cbg
-
-| Before (0.3.x) | Now (0.4.0) |
-| --- | --- |
-| `import cbg` | `import spillway` |
-| `[cbg preview] original N bytes, M linhas; …` | `[spillway preview] original N bytes, M lines; …` |
-| `CBG_MODE`, `CBG_LOG_DIR`, … | `SPILLWAY_MODE`, `SPILLWAY_LOG_DIR`, … (`CBG_*` still read as fallback) |
-| `python3 adapters/mcp_proxy/proxy.py …` | `spillway mcp …` (the old path still works from a checkout) |
-
-The full list is in the [CHANGELOG](CHANGELOG.md#040--2026-11-18). The Hermes plugin that 0.3.x and 0.4.x shipped is removed in 0.5.0.
 
 ## License
 
-[MIT](LICENSE) © Ricardo Margalho. Contributions are welcome, especially small adversarial reproductions. Follow the [code of conduct](CODE_OF_CONDUCT.md).
+[MIT](LICENSE) © Ricardo Margalho. Contributions are welcome; please follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
