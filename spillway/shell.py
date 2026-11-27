@@ -112,15 +112,45 @@ class _Forwarder:
             self.send(signum)
 
 
+class _Foreground:
+    """Hands the controlling terminal to the child's group and gives it back on every exit path."""
+
+    def __init__(self) -> None:
+        self.home = 0
+        self.active = False
+        self.saved: Any = None
+        self.masked = False
+
+    def give(self, pgid: int) -> None:
+        try:
+            if not os.isatty(0) or os.tcgetpgrp(0) != os.getpgrp():
+                return
+            self.home = os.getpgrp()
+            self.saved = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+            self.masked = True
+            os.tcsetpgrp(0, pgid)
+            self.active = True
+            os.killpg(pgid, signal.SIGCONT)
+        except OSError:
+            self.restore()
+
+    def restore(self) -> None:
+        if self.active:
+            self.active = False
+            try:
+                os.tcsetpgrp(0, self.home)
+            except OSError:
+                pass
+        if self.masked:
+            self.masked = False
+            try:
+                signal.signal(signal.SIGTTOU, self.saved)
+            except (ValueError, OSError):
+                pass
+
+
 def _exit_status(returncode: int) -> int:
     return 128 - returncode if returncode < 0 else returncode
-
-
-def _stdin_is_tty() -> bool:
-    try:
-        return os.isatty(0)
-    except OSError:
-        return False
 
 
 def _artifact_hint(log_dir: Path) -> str:
@@ -245,8 +275,9 @@ def run_main(argv: List[str]) -> int:
     store = ArtifactStore(args.log_dir, max_artifacts=args.max_artifacts, max_bytes=args.max_artifact_bytes)
     enforce = args.mode == "enforce"
     sink = _Sink()
-    own_group = os.name == "posix" and not _stdin_is_tty()
+    own_group = os.name == "posix"
     fwd = _Forwarder(own_group)
+    foreground = _Foreground()
     fwd.install()
     chunks: List[bytes] = []
     overflow = False
@@ -262,6 +293,8 @@ def run_main(argv: List[str]) -> int:
             print("spillway run: cannot execute %s: %s" % (cmd[0], exc.strerror or type(exc).__name__), file=sys.stderr)
             return 126
         fwd.attach(proc)
+        if own_group:
+            foreground.give(proc.pid)
         finished = False
         try:
             chunks, overflow = _pump(proc, fwd, sink, enforce, max(1, args.max_capture_bytes))
@@ -276,6 +309,7 @@ def run_main(argv: List[str]) -> int:
             proc.stdout.close()
             proc.wait()
     finally:
+        foreground.restore()
         fwd.restore()
     if not overflow:
         data = b"".join(chunks)

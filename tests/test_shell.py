@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import pty
 import re
 import signal
 import subprocess
@@ -665,6 +666,140 @@ class RobustnessTests(unittest.TestCase):
         self.assertEqual(summary["skipped_lines"], 6)
         self.assertEqual(summary["reads"], 1)
         self.assertEqual(summary["shell_enforced_spilled"], 0)
+
+
+TTY_SHIM = (
+    "import fcntl, os, signal, subprocess, sys, termios\n"
+    "fcntl.ioctl(0, termios.TIOCSCTTY, 0)\n"
+    "signal.signal(signal.SIGTTOU, signal.SIG_IGN)\n"
+    "job = subprocess.Popen(sys.argv[4:], process_group=0)\n"
+    "if sys.argv[3] == 'job':\n"
+    "    os.tcsetpgrp(0, job.pid)\n"
+    "open(sys.argv[1], 'w').write(str(job.pid))\n"
+    "rc = job.wait()\n"
+    "home = job.pid if sys.argv[3] == 'job' else os.getpgrp()\n"
+    "open(sys.argv[2], 'w').write('%d %d %d' % (rc, os.tcgetpgrp(0), home))\n"
+)
+
+WAITER = (
+    "import os, signal, subprocess, sys\n"
+    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+    "g = subprocess.Popen(['sleep', '60'])\n"
+    "open(sys.argv[1] + '.tmp', 'w').write('%d %d' % (os.getpid(), g.pid))\n"
+    "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "g.wait()\n"
+)
+
+
+def wait_for_file(path, timeout=20.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if path.exists():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "POSIX ptys and /proc")
+class TtyStdinTests(unittest.TestCase):
+    def _start(self, tmp, run_args, command, foreground="job"):
+        try:
+            master, slave = pty.openpty()
+        except OSError:
+            self.skipTest("no pty available")
+        tmp = Path(tmp)
+        env = dict(os.environ, PYTHONPATH=str(ROOT))
+        shim = subprocess.Popen(
+            [sys.executable, "-c", TTY_SHIM, str(tmp / "jobpid"), str(tmp / "result"), foreground, sys.executable, "-m",
+             "spillway.cli", "run", *run_args, "--log-dir", str(tmp / "logs"), "--", *command],
+            stdin=slave, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=str(ROOT), env=env,
+            start_new_session=True,
+        )
+        os.close(slave)
+        return master, shim
+
+    def _finish(self, master, shim, pids):
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        if shim.poll() is None:
+            shim.kill()
+        shim.wait()
+        os.close(master)
+
+    def test_signal_to_wrapper_with_tty_stdin_reaches_descendants_and_restores_terminal(self):
+        for mode in ("shadow", "enforce"):
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                with tempfile.TemporaryDirectory() as tmp:
+                    pidfile = Path(tmp) / "pids"
+                    master, shim = self._start(
+                        tmp, ["--mode", mode], [sys.executable, "-c", WAITER, str(pidfile)]
+                    )
+                    pids = []
+                    try:
+                        self.assertTrue(wait_for_file(Path(tmp) / "jobpid"), (mode, sig))
+                        self.assertTrue(wait_for_file(pidfile), (mode, sig))
+                        pids = [int(v) for v in pidfile.read_text().split()]
+                        wrapper_pid = int((Path(tmp) / "jobpid").read_text())
+                        os.kill(wrapper_pid, sig)
+                        try:
+                            shim.wait(timeout=20)
+                        except subprocess.TimeoutExpired:
+                            self.fail("wrapper did not exit: %s %s" % (mode, sig))
+                        rc, foreground, job = (int(v) for v in (Path(tmp) / "result").read_text().split())
+                        self.assertEqual(rc, 128 + int(sig), (mode, sig))
+                        self.assertEqual(foreground, job, (mode, sig))
+                        self.assertTrue(wait_dead(pids), (mode, sig))
+                    finally:
+                        self._finish(master, shim, pids)
+
+    def test_wrapper_running_as_a_background_job_still_signals_descendants(self):
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with tempfile.TemporaryDirectory() as tmp:
+                pidfile = Path(tmp) / "pids"
+                master, shim = self._start(tmp, [], [sys.executable, "-c", WAITER, str(pidfile)], foreground="shell")
+                pids = []
+                try:
+                    self.assertTrue(wait_for_file(Path(tmp) / "jobpid"), sig)
+                    self.assertTrue(wait_for_file(pidfile), sig)
+                    pids = [int(v) for v in pidfile.read_text().split()]
+                    os.kill(int((Path(tmp) / "jobpid").read_text()), sig)
+                    try:
+                        shim.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        self.fail("wrapper did not exit: %s" % sig)
+                    rc, foreground, home = (int(v) for v in (Path(tmp) / "result").read_text().split())
+                    self.assertEqual(rc, 128 + int(sig), sig)
+                    self.assertEqual(foreground, home, sig)
+                    self.assertTrue(wait_dead(pids), sig)
+                finally:
+                    self._finish(master, shim, pids)
+
+    def test_command_keeps_terminal_access_and_terminal_is_restored(self):
+        code = (
+            "import sys\n"
+            "line = input()\n"
+            "open(sys.argv[1], 'w').write(line)\n"
+        )
+        for mode in ("shadow", "enforce"):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "typed"
+                master, shim = self._start(tmp, ["--mode", mode], [sys.executable, "-c", code, str(out)])
+                try:
+                    self.assertTrue(wait_for_file(Path(tmp) / "jobpid"), mode)
+                    os.write(master, b"hello\n")
+                    try:
+                        shim.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        self.fail("wrapper did not exit: " + mode)
+                    rc, foreground, job = (int(v) for v in (Path(tmp) / "result").read_text().split())
+                    self.assertEqual(rc, 0, mode)
+                    self.assertEqual(foreground, job, mode)
+                    self.assertEqual(out.read_text(), "hello", mode)
+                finally:
+                    self._finish(master, shim, [])
 
 
 class HelpTests(unittest.TestCase):
