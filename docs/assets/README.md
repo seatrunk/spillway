@@ -1,30 +1,26 @@
 # README artwork
 
-Original project illustrations, distributed under the repository's existing MIT license. These are editable SVG graphics—not generated performance charts, screenshots of a shipped product, or evidence of runtime approval.
+Project illustrations distributed under the repository's existing MIT license. These graphics are documentation visuals — not screenshots of a shipped production runtime or evidence of `enforce` approval.
 
-| Source | PNG export | Purpose |
+## README PNGs
+
+| Image | Dimensions | Purpose |
 | --- | --- | --- |
-| [hero.svg](hero.svg) | [hero.png](hero.png) | The concept: less noise, preserve the clue, recover detail |
-| [output-flow.svg](output-flow.svg) | [output-flow.png](output-flow.png) | Intended output, metadata, trust boundary and artifact flow |
-| [roadmap.svg](roadmap.svg) | [roadmap.png](roadmap.png) | Current rejected review and the remaining promotion gates |
-| [evaluation.svg](evaluation.svg) | [evaluation.png](evaluation.png) | Proposed comparison arms, semantic oracles and later efficiency metrics |
+| [hero.png](hero.png) | 2560 × 1120 | Top-of-README overview of Spillway's bounded preview and local recovery flow (`rust_cargo_mid`, 640 B cap) |
+| [before-after.png](before-after.png) | 2560 × 1440 | Illustrative reconstruction comparing 640 B naive head truncation vs Spillway's core preview (518 B unwrapped / 567 B framed) on `rust_cargo_mid` |
+| [benchmark.png](benchmark.png) | 2560 × 1080 | Visual summary of PR #23's single-machine real-session replay (737 tool outputs, 4 KiB and 8 KiB caps, bytes and diagnostic fidelity only) |
 
-The README embeds SVG so graphics remain crisp when zoomed. PNG exports are provided for viewers that do not display SVG. Each SVG contains an accessible title and description, local/system font fallbacks, and no JavaScript, remote assets or external font downloads. README alt text and nearby prose provide a text alternative; status is communicated in words, not color alone.
+README alt text, nearby prose, copyable code excerpts, and Markdown tables provide full accessible equivalents for every graphic.
 
-The [visual guide](../visual-guide.html) embeds all four illustrations and its CSS in one offline HTML file. **Download and open it locally:** GitHub displays HTML source rather than executing this page.
+## Legacy SVG sources and visual guide
 
-## Editing and exports
+The original editable SVGs remain intact and are embedded in the offline [visual guide](../visual-guide.html) (**download and open locally**, since GitHub renders HTML source rather than executing it):
 
-Edit the SVG source, then regenerate its PNG with librsvg's `rsvg-convert`:
+| SVG source | Legacy PNG export | Purpose |
+| --- | --- | --- |
+| [hero.svg](hero.svg) | — (superseded by standalone [hero.png](hero.png)) | Original concept diagram |
+| [output-flow.svg](output-flow.svg) | [output-flow.png](output-flow.png) | Output, metadata, trust boundary, and artifact flow |
+| [roadmap.svg](roadmap.svg) | [roadmap.png](roadmap.png) | Historical review status and promotion gates |
+| [evaluation.svg](evaluation.svg) | [evaluation.png](evaluation.png) | Comparison arms, semantic oracles, and efficiency metrics |
 
-```sh
-for source in docs/assets/*.svg; do
-  rsvg-convert "$source" --output "${source%.svg}.png"
-done
-```
-
-Also refresh the matching inline SVG in `docs/visual-guide.html`. This export tool is optional artwork-maintenance tooling; it is not a dependency of the public Python checks or an installer for the absent runtime.
-
-Keep the design language consistent: dark navy canvas, cyan data flow, emerald retained metadata, violet recovery detail, amber planned gates and rose rejection/blockers. Preserve the explicit experimental/not-shipped/blocked labels. If the actual state changes, update status text, image descriptions, README prose and the gallery together.
-
-Before publishing: parse SVG XML, inspect rendered images for clipped/overlapping labels and incorrect arrows, verify SVG/PNG dimensions, inspect small-width presentation, run repository checks, and verify exact-head GitHub CI. Do not invent a compression ratio, savings number or completion percentage to fill an empty chart.
+When regenerating legacy PNG exports from SVGs with librsvg's `rsvg-convert`, export only the matching SVG-backed files (`output-flow.svg`, `roadmap.svg`, `evaluation.svg`) so the standalone README PNGs (`hero.png`, `before-after.png`, `benchmark.png`) are not overwritten. Optional artwork-maintenance tools are not dependencies of Spillway's Python runtime or checks.
