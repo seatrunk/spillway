@@ -271,6 +271,99 @@ class Report(unittest.TestCase):
     def test_caps_below_the_core_floor_are_rejected(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             rr.main(["--caps", "100", "--home", tempfile.gettempdir()])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            rr.main(["--caps", "4096,100", "--home", tempfile.gettempdir()])
+
+
+class MultiCap(unittest.TestCase):
+    def _build_sized_log(self, line_count, mid, tail):
+        lines = ["compiling unit %04d SENTINEL_BODY" % i for i in range(line_count)]
+        lines[line_count // 2] = "error[E0308]: mismatched types --> " + mid
+        lines.append("error: aborting due to previous error at " + tail)
+        return "\n".join(lines)
+
+    def _make_tiered_home(self, home):
+        def claude_use(tid, name):
+            return {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": name, "input": {"command": "SENTINEL_COMMAND"}}]}}
+
+        def claude_res(tid, content, error=False):
+            return {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tid, "is_error": error, "content": content}]}}
+
+        tiers = [
+            ("t1", 90, "src/acme_mid.rs:11:1", "src/acme_tail.rs:12:1"),
+            ("t2", 180, "src/acme_mid.rs:21:1", "src/acme_tail.rs:22:1"),
+            ("t3", 360, "src/acme_mid.rs:31:1", "src/acme_tail.rs:32:1"),
+            ("t4", 620, "src/acme_mid.rs:41:1", "src/acme_tail.rs:42:1"),
+        ]
+        objs = [{"type": "user", "message": {"role": "user", "content": "SENTINEL_PROMPT"}}]
+        for idx, (tid, count, mid, tail) in enumerate(tiers, start=1):
+            objs.append(claude_use(tid, "Bash"))
+            objs.append(claude_res(tid, f"Exit code {idx}\n" + self._build_sized_log(count, mid, tail), True))
+        objs.append(claude_use("t5", "Bash"))
+        objs.append(claude_res("t5", "ok SENTINEL_BODY", False))
+        write_jsonl(home / ".claude/projects/-work-SENTINEL_PROJECT/session.jsonl", objs)
+
+        json_out = json.dumps({"output": self._build_sized_log(200, "src/acme_secret/a.py:7", "src/acme_secret/b.py:8"),
+                               "metadata": {"exit_code": 3, "duration_seconds": 0.1}})
+        write_jsonl(home / ".codex/sessions/2026/11/26/rollout.jsonl", [
+            {"type": "response_item", "payload": {"type": "function_call", "call_id": "c1", "name": "shell",
+                                                  "arguments": "{}"}},
+            {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": json_out}},
+        ])
+        return home
+
+    def test_multi_cap_reports_aggregate_table_per_cap_and_preserves_privacy(self):
+        caps = [2048, 4096, 8192, 16384]
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._make_tiered_home(Path(tmp) / "home")
+            out = Path(tmp) / "report.json"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = rr.main(["--home", str(home), "--out", str(out), "--caps", "2048,4096,8192,16384"])
+            stdout = buf.getvalue()
+            written = out.read_text(encoding="utf-8")
+        self.assertEqual(rc, 0)
+        report = json.loads(written)
+        rr.assert_aggregate_only(report)
+        self.assertEqual(report["caps_bytes"], caps)
+        self.assertEqual(set(report["caps"].keys()), {str(c) for c in caps})
+        positions = [stdout.index(f"cap {c} bytes:") for c in caps]
+        self.assertEqual(positions, sorted(positions))
+
+        over_counts = [sum(h["over_cap"][str(c)] for h in report["harnesses"].values()) for c in caps]
+        self.assertEqual(over_counts, [5, 4, 2, 1])
+
+        prev_trunc_bytes = -1
+        prev_spill_bytes = -1
+        for c, over in zip(caps, over_counts):
+            self.assertIn(f"cap {c} bytes: 6 tool results, {over} over the cap", stdout)
+            block = report["caps"][str(c)]["all"]
+            self.assertEqual(block["tool_results"], 6)
+            arms = block["arms"]
+            self.assertEqual(set(arms.keys()), {"none", "truncate", "spillway"})
+            self.assertEqual(arms["spillway"]["locations"]["refs_kept"], arms["spillway"]["locations"]["refs"])
+            self.assertLess(arms["truncate"]["locations"]["refs_kept"], arms["truncate"]["locations"]["refs"])
+            self.assertEqual(arms["spillway"]["exit_code"]["kept"], arms["spillway"]["exit_code"]["applicable"])
+            self.assertLessEqual(prev_trunc_bytes, arms["truncate"]["bytes"])
+            self.assertLessEqual(prev_spill_bytes, arms["spillway"]["bytes"])
+            prev_trunc_bytes = arms["truncate"]["bytes"]
+            prev_spill_bytes = arms["spillway"]["bytes"]
+
+        self.assertEqual(stdout.count("locs all kept"), len(caps))
+
+        forbidden = list(SENTINELS) + [str(home), str(tmp), "/home/", "Exit code", "compiling unit"]
+        host = socket.gethostname()
+        if len(host) > 3:
+            forbidden.append(host)
+        for blob, label in ((stdout, "stdout"), (written, "report file")):
+            for needle in forbidden:
+                self.assertNotIn(needle, blob, "%s leaks %r" % (label, needle))
+
+    def test_default_caps_and_deduplication_order(self):
+        self.assertEqual(rr.DEFAULT_CAPS, (2048, 4096, 8192, 16384))
+        self.assertEqual(rr._caps("16384,2048,4096,4096"), [2048, 4096, 16384])
 
 
 if __name__ == "__main__":

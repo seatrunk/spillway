@@ -11,7 +11,7 @@
 
 Think of a dam spillway. Normal flow passes untouched. During a surge the crest height is enforced, and the overflow is diverted to a basin instead of breaking things downstream.
 
-> **Status: experimental (v0.5.0).** The core and the MCP proxy work, are tested, and default to **`shadow`**: they measure and log, and the model sees the original output. **`enforce` is not production-approved.** See [rollout gates](docs/rollout.md) and [project status](docs/project-status.md). Previously named *Context Budget Guard* (`cbg`); see [migration](#migrating-from-context-budget-guard).
+> **Status: experimental (v0.5.0).** The core and the MCP proxy work, are tested, and default to **`shadow`**: they measure and log, and the model sees the original output. **`enforce` is not production-approved.** See [rollout gates](docs/rollout.md) and [project status](docs/project-status.md). Previously named *Context Budget Guard* (`cbg`); see [migration](#migrating-from-cbg).
 
 **[Why](#why) · [What the model sees](#what-the-model-sees) · [Quick start](#quick-start) · [Configuration](#configuration) · [Recovery](#recovering-spilled-output) · [How it works](#how-it-works) · [Evidence](#evidence) · [Security](#security-and-privacy) · [Development](#development)**
 
@@ -219,7 +219,7 @@ Standard library only, with no dev dependencies. CI runs all of the above, plus 
 
 The [operating skill](SKILL.md) describes how to review output-budget evidence. The [visual guide](docs/visual-guide.html) collects the diagrams.
 
-## Migrating from Context Budget Guard
+## Migrating from cbg
 
 | Before (0.3.x) | Now (0.4.0) |
 | --- | --- |
