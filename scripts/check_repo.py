@@ -21,9 +21,10 @@ REQUIRED = ["README.md", "CHANGELOG.md", "pyproject.toml", "LICENSE", "SKILL.md"
             ".github/workflows/ci.yml", ".github/dependabot.yml"]
 OLD_NAME = "-".join(("context", "budget", "guard"))
 OLD_NAME_RE = re.compile(OLD_NAME.encode("ascii"), re.IGNORECASE)
-ALLOWED_COMMENT_RE = re.compile(r"#\s*noqa(?::\s*[A-Z0-9]+(?:\s*,\s*[A-Z0-9]+)*)?")
+ALLOWED_COMMENT_RE = re.compile(r"#\s*noqa(?::\s*[A-Z]{1,4}[0-9]{1,4}(?:\s*,\s*[A-Z]{1,4}[0-9]{1,4})*)?")
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 SKIP_DIRS = frozenset({".git", "__pycache__", ".venv", "node_modules", "build", "dist"})
+ZERO_SHA = "0" * 40
 
 
 def _git(root: Path, *args: str, text: bool = True) -> subprocess.CompletedProcess:
@@ -82,40 +83,76 @@ def _old_name_errors(root: Path = ROOT) -> List[str]:
     return errors
 
 
-def _tracked_real_replay_results_errors(root: Path = ROOT) -> List[str]:
+def _resolve_base_commit(root: Path, base_ref: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    in_ci = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    head = _git(root, "rev-parse", "--verify", "HEAD^{commit}")
+    if head.returncode != 0:
+        return None, None
+    head_sha = head.stdout.strip()
+    if base_ref is not None:
+        resolved: Optional[str] = None
+        res = _git(root, "merge-base", base_ref, "HEAD")
+        if res.returncode == 0 and res.stdout.strip():
+            resolved = res.stdout.strip()
+        else:
+            res = _git(root, "rev-parse", "--verify", base_ref + "^{commit}")
+            if res.returncode == 0 and res.stdout.strip():
+                resolved = res.stdout.strip()
+        if resolved is None:
+            return None, "python comment check: could not resolve base ref " + base_ref
+        if in_ci and resolved == head_sha:
+            return None, "python comment check: resolved base ref equals HEAD (shallow clone or missing base?)"
+        return resolved, None
+    candidates: List[str] = []
+    gh_base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    if gh_base:
+        candidates.extend(["origin/" + gh_base, gh_base])
+    gh_event = os.environ.get("GITHUB_EVENT_NAME", "").strip()
+    if gh_event == "pull_request":
+        candidates.append("HEAD^1")
+    gh_before = os.environ.get("GITHUB_EVENT_BEFORE", "").strip()
+    if gh_before and gh_before != ZERO_SHA:
+        candidates.append(gh_before)
+    candidates.extend(["origin/main", "main"])
+    if gh_event == "workflow_dispatch":
+        candidates.append("HEAD~1")
+    for ref in candidates:
+        res = _git(root, "merge-base", ref, "HEAD")
+        if res.returncode == 0 and res.stdout.strip():
+            resolved = res.stdout.strip()
+            if resolved != head_sha:
+                return resolved, None
+    if in_ci:
+        return None, "python comment check: base ref not found (shallow clone?)"
+    return head_sha, None
+
+
+def _tracked_real_replay_results_errors(root: Path = ROOT, base_ref: Optional[str] = None) -> List[str]:
     if not (root / ".git").exists():
         return []
     res = _git(root, "ls-files", "-z", "--", "benchmarks/real/results", text=False)
     if res.returncode != 0:
         return ["benchmarks/real/results/: could not inspect git index"]
     tracked = sorted(p.decode("utf-8", "surrogateescape") for p in res.stdout.split(b"\x00") if p)
-    return [rel + ": tracked file under benchmarks/real/results/ is forbidden" for rel in tracked]
-
-
-def _resolve_base_commit(root: Path, base_ref: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    if base_ref is not None:
-        res = _git(root, "merge-base", base_ref, "HEAD")
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip(), None
-        res = _git(root, "rev-parse", "--verify", base_ref + "^{commit}")
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip(), None
-        return None, "python comment check: could not resolve base ref " + base_ref
-    head = _git(root, "rev-parse", "--verify", "HEAD^{commit}")
-    if head.returncode != 0:
-        return None, None
-    candidates: List[str] = []
-    gh_base = os.environ.get("GITHUB_BASE_REF", "").strip()
-    if gh_base:
-        candidates.extend(["origin/" + gh_base, gh_base])
-    if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
-        candidates.append("HEAD^1")
-    candidates.extend(["origin/main", "main", "HEAD"])
-    for ref in candidates:
-        res = _git(root, "merge-base", ref, "HEAD")
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip(), None
-    return "HEAD", None
+    errors = [rel + ": tracked file under benchmarks/real/results/ is forbidden" for rel in tracked]
+    seen = set(tracked)
+    base_commit, _ = _resolve_base_commit(root, base_ref)
+    if base_commit is not None:
+        hist = _git(
+            root,
+            "log", "--name-only", "-z", "--format=", base_commit + "..HEAD", "--", "benchmarks/real/results",
+            text=False,
+        )
+        if hist.returncode != 0:
+            errors.append("benchmarks/real/results/: could not inspect git history")
+        else:
+            hist_paths = sorted(
+                {p.decode("utf-8", "surrogateescape").strip("\n") for p in hist.stdout.split(b"\x00") if p.strip(b"\n")}
+            )
+            for rel in hist_paths:
+                if rel not in seen:
+                    errors.append(rel + ": file under benchmarks/real/results/ in branch history is forbidden")
+    return errors
 
 
 def _added_python_lines(root: Path, base_ref: Optional[str]) -> Tuple[Dict[str, Optional[Set[int]]], List[str]]:
@@ -128,28 +165,49 @@ def _added_python_lines(root: Path, base_ref: Optional[str]) -> Tuple[Dict[str, 
         if files is None:
             return {}, ["python comment check: git ls-files failed"]
         return {rel: None for rel in files if rel.endswith(".py")}, []
-    diff = _git(
-        root,
-        "-c", "core.quotePath=false",
-        "-c", "diff.mnemonicPrefix=false",
-        "-c", "diff.noprefix=false",
-        "diff", "--no-ext-diff", "--no-color", "-U0", "--diff-filter=ACMR", base_commit, "--", "*.py",
-    )
-    if diff.returncode != 0:
-        return {}, ["python comment check: git diff failed"]
-    current: Optional[str] = None
-    for line in diff.stdout.splitlines():
-        if line.startswith("+++ b/"):
-            current = line[6:]
-        elif line.startswith("+++ "):
-            current = None
-        elif current is not None:
+    names = _git(root, "diff", "--name-status", "-z", "-M", "--diff-filter=ACMR", base_commit, text=False)
+    if names.returncode != 0:
+        return {}, ["python comment check: git diff --name-status failed"]
+    tokens = [p.decode("utf-8", "surrogateescape") for p in names.stdout.split(b"\x00") if p]
+    idx = 0
+    while idx < len(tokens):
+        status = tokens[idx]
+        idx += 1
+        if status.startswith(("R", "C")):
+            if idx + 1 >= len(tokens):
+                return {}, ["python comment check: malformed git diff --name-status output"]
+            old_rel, rel = tokens[idx], tokens[idx + 1]
+            idx += 2
+            if not rel.endswith(".py"):
+                continue
+            if status == "R100":
+                continue
+            diff_args = ["-M", "--no-ext-diff", "--no-color", "-U0", base_commit, "--"]
+            diff_args.extend([old_rel, rel] if status.startswith("R") else [rel])
+        else:
+            if idx >= len(tokens):
+                return {}, ["python comment check: malformed git diff --name-status output"]
+            rel = tokens[idx]
+            idx += 1
+            if not rel.endswith(".py"):
+                continue
+            diff_args = ["--no-ext-diff", "--no-color", "-U0", base_commit, "--", rel]
+        diff = _git(
+            root,
+            "-c", "core.quotePath=false",
+            "-c", "diff.mnemonicPrefix=false",
+            "-c", "diff.noprefix=false",
+            "diff", *diff_args,
+        )
+        if diff.returncode != 0:
+            return {}, [rel + ": python comment check git diff failed"]
+        for line in diff.stdout.splitlines():
             match = HUNK_RE.match(line)
             if match:
                 start = int(match.group(1))
                 count = 1 if match.group(2) is None else int(match.group(2))
                 if count > 0:
-                    added.setdefault(current, set()).update(range(start, start + count))
+                    added.setdefault(rel, set()).update(range(start, start + count))
     untracked = _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", "*.py", text=False)
     if untracked.returncode != 0:
         return added, ["python comment check: git ls-files failed"]
@@ -166,6 +224,7 @@ def _new_python_comment_errors(root: Path = ROOT, base_ref: Optional[str] = None
     for rel, lines in sorted(added.items()):
         path = root / rel
         if path.is_symlink() or not path.is_file():
+            errors.append(rel + ": changed Python file is missing or not a regular file")
             continue
         try:
             with path.open("rb") as fh:
@@ -233,7 +292,7 @@ def check(root: Path = ROOT, base_ref: Optional[str] = None) -> List[str]:
         if not text.startswith("---\n") or "\n---\n" not in text[4:]:
             errors.append("SKILL.md: missing YAML frontmatter")
     errors.extend(_old_name_errors(root))
-    errors.extend(_tracked_real_replay_results_errors(root))
+    errors.extend(_tracked_real_replay_results_errors(root, base_ref=base_ref))
     errors.extend(_new_python_comment_errors(root, base_ref=base_ref))
     return errors
 

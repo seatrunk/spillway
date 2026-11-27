@@ -25,7 +25,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Repository contracts and public-data hygiene
-        run: python3 scripts/check_repo.py
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            python3 scripts/check_repo.py --base "origin/$BASE_REF"
+          elif [ -n "$EVENT_BEFORE" ] && [ "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            python3 scripts/check_repo.py --base "$EVENT_BEFORE"
+          else
+            python3 scripts/check_repo.py
+          fi
       - name: Minimal lint (compileall)
         run: python3 -m compileall -q spillway adapters benchmarks scripts tests
       - name: Core, adapters, invariants and tooling
