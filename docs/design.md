@@ -104,7 +104,7 @@ The core (`apply_budget`) writes these fields. Adapters write them to `receipts.
 | `violations_before_failclose` | Violations found before failing closed (normally `[]`) |
 | `policy_error`, `aggregate_bytes`, `aggregate_unsatisfiable` | Batch settlement only |
 
-Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). `spillway run` writes `source: "shell"` (and `adapter: "shell"`); receipts without `source` are treated as MCP by `spillway stats`. When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
+Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). `spillway run` writes `source: "shell"` (and `adapter: "shell"`) and is content-free: `error_locations`, `diagnostic_clues` and `violations_before_failclose` are replaced by `error_location_count`, `diagnostic_clue_count` and `violation_count`, and `would_change` is true only when a verified preview carrying the artifact hash was delivered; receipts without `source` are treated as MCP by `spillway stats`. When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
 
 ### Read events
 

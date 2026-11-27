@@ -97,11 +97,18 @@ spillway run --mode enforce --cap 16384 -- pytest -x        # enforce: oversized
 The command runs without a shell (argv exactly as given), stdout and stderr are merged in arrival order, and `spillway run` exits with the command's exit code (128+N if a signal killed it; 127 if it is not found). The exit code and `file:line` locations are fed to the same budget the MCP proxy uses.
 
 - **`shadow`** (default): prints the original output byte for byte and appends one content-free receipt (`"source": "shell"`, with `would_change`) to `receipts.jsonl`. Like the MCP proxy, it stores no artifact.
-- **`enforce`**: prints the preview (header with the artifact sha256, head, tail) and stores the original under `artifacts/` (0600, content-addressed, pruned on write). Output that fits the cap is printed unchanged. If anything inside Spillway fails, the original output is printed.
+- **`enforce`**: prints the preview (header with the artifact sha256, head, tail) and stores the original under `artifacts/` (0600, content-addressed, pruned on write). Output that fits the cap is printed unchanged. If anything inside Spillway fails, or the core cannot produce a verified preview that carries the artifact sha256 (for example a very small `--cap`), the original output is printed and no artifact is stored.
+
+Operational behavior:
+
+- **Signals:** SIGINT and SIGTERM sent to `spillway run` are forwarded to the command. When stdin is not a terminal the command runs in its own process group and the whole group receives the signal. The exit status follows the command (130 or 143 after those signals), and the command is always reaped.
+- **Memory bound:** at most `--max-capture-bytes` (default 16 MiB, or `SPILLWAY_MAX_CAPTURE_BYTES`) are held in memory. Beyond that, output streams through unchanged and unbudgeted, with no receipt and no artifact, and the exit status is still the command's.
+- **Output errors:** if stdout cannot be written (full disk, closed pipe), `spillway run` prints one line to stderr, still drains and reaps the command, and exits with the command's status.
+- **Privacy:** shell receipts keep sizes, hashes, mode, exit code and counts (`error_location_count`, `diagnostic_clue_count`). They never contain output text, paths or clue lines, although the model-visible preview does.
 
 `enforce` is **not production-approved**: it stays behind the [rollout gates](docs/rollout.md). Do not add it to real agent profiles or hooks until those gates are met. Use `shadow` to measure first.
 
-Without a cap flag the cap is `SPILLWAY_RESULT_CAP` or 16,384 bytes, and `--log-dir` defaults to `SPILLWAY_LOG_DIR` or `~/.cache/spillway`. `--wrap-untrusted` keeps the `<untrusted_tool_result>` wrapper in the enforced output.
+Without a cap flag the cap is `SPILLWAY_RESULT_CAP` or 16,384 bytes, and `--log-dir` defaults to `SPILLWAY_LOG_DIR` or `~/.cache/spillway`. With `--wrap-untrusted`, enforced output is wrapped in `<untrusted_tool_result>` and neutralized, including results that fit the cap; without it, results that fit are printed exactly as the command wrote them.
 
 ### 3. Library
 
@@ -133,6 +140,7 @@ The budgeting core (`limits`, `render`, `notes`, `sanitize`, `facts`, `budget`, 
 | `SPILLWAY_WRAP_UNTRUSTED` | `--wrap-untrusted` | off | Keep the `<untrusted_tool_result>` wrapper in the enforced text |
 | `SPILLWAY_MAX_ARTIFACTS` | `--max-artifacts` | `200` | Retention: maximum number of artifact files (oldest are evicted first) |
 | `SPILLWAY_MAX_ARTIFACT_BYTES` | `--max-artifact-bytes` | `104857600` | Retention: maximum total artifact bytes |
+| `SPILLWAY_MAX_CAPTURE_BYTES` | `--max-capture-bytes` (`spillway run`) | `16777216` | Output bytes held in memory before `run` streams through unbudgeted |
 
 The legacy `CBG_MODE`, `CBG_LOG_DIR`, `CBG_RESULT_CAP` are still read when the matching `SPILLWAY_*` variable is unset or empty.
 

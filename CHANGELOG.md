@@ -11,6 +11,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 - **Receipt `source` field and `read` events:** shell receipts carry `"source": "shell"`; each `spillway read` appends `{"event": "read", ...}`. Receipts without `source` still parse and count as `mcp`.
 - **`spillway stats`:** reports `by_source`, `reads`, `shell_enforced_spilled`, `shell_enforced_recovered` and `recovery_rate` (share of enforced shell results whose artifact was read later).
 
+- **Robust shell wrapper:** capture is bounded (`--max-capture-bytes`, default 16 MiB; overflow streams through unbudgeted); SIGINT and SIGTERM are forwarded to the command's process group and the command is always reaped; stdout write failures keep the command's exit status and print no traceback; a `failclosed` core outcome or any result without a verified artifact pointer fails open to the original output; `--wrap-untrusted` also wraps and neutralizes results that fit the cap.
+- **Content-free shell receipts:** shell receipts keep counts instead of `error_locations`, `diagnostic_clues` and violation strings. `spillway stats` skips recognized rows whose fields have the wrong type.
+
 The MCP path, the core and `benchmarks/replay/results/offline-replay.json` are unchanged.
 
 ## [0.5.0] — 2026-11-26

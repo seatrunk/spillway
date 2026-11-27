@@ -33,6 +33,19 @@ def _default_log_dir() -> Path:
     return Path.home() / ".cache" / "spillway"
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _valid_result_row(obj: dict) -> bool:
+    """True when the fields stats aggregates have usable types."""
+    if not isinstance(obj.get("mode"), str) or not _is_number(obj.get("original_bytes")):
+        return False
+    if "rendered_bytes" in obj and not _is_number(obj["rendered_bytes"]):
+        return False
+    return all(isinstance(obj[k], str) for k in ("source", "adapter_mode", "artifact_sha256") if k in obj)
+
+
 def _cmd_stats(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(prog="spillway stats", description="Summarize a receipts.jsonl file.")
     ap.add_argument("receipts", nargs="?", type=Path, default=_default_log_dir() / "receipts.jsonl")
@@ -57,11 +70,17 @@ def _cmd_stats(argv: List[str]) -> int:
                 skipped += 1
                 continue
             if isinstance(obj, dict) and "mode" in obj and "original_bytes" in obj:
-                rows.append(obj)
-                ordered.append(obj)
+                if _valid_result_row(obj):
+                    rows.append(obj)
+                    ordered.append(obj)
+                else:
+                    skipped += 1
             elif isinstance(obj, dict) and obj.get("event") == "read":
-                reads += 1
-                ordered.append(obj)
+                if isinstance(obj.get("sha256"), str):
+                    reads += 1
+                    ordered.append(obj)
+                else:
+                    skipped += 1
     by_mode = {}
     for r in rows:
         by_mode[r["mode"]] = by_mode.get(r["mode"], 0) + 1
