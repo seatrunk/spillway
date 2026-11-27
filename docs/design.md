@@ -80,7 +80,7 @@ The budgeting core does no I/O. [`artifacts.py`](../spillway/artifacts.py) is th
 
 The MCP proxy defaults to `shadow` and **fails open**: on any internal error the original result passes through. See [adapters/mcp_proxy](../adapters/mcp_proxy/README.md).
 
-[`shell.py`](../spillway/shell.py) is a second adapter over the same core. `spillway run` budgets one command's merged output as a single text result with the command's exit code, and `spillway read` prints a neutralized `read_slice` window. `run` defaults to `shadow` and fails open as well; like the proxy, only `enforce` stores artifacts.
+[`shell.py`](../spillway/shell.py) is a second adapter over the same core. `spillway run` budgets one command's merged output as a single text result with the command's exit code, and `spillway read` prints a neutralized `read_slice` window. `run` defaults to `shadow` and fails open as well; like the proxy, only `enforce` stores artifacts. With a terminal on stdin, `run` execs the command and passes through without measuring.
 
 ## Receipt fields
 

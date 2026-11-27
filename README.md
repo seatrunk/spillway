@@ -101,7 +101,8 @@ The command runs without a shell (argv exactly as given), stdout and stderr are 
 
 Operational behavior:
 
-- **Signals:** SIGINT and SIGTERM sent to `spillway run` are forwarded to the command. The command runs in its own process group and the whole group receives the signal. When stdin is a terminal and `spillway run` is the foreground job, the terminal's foreground is handed to that group (so interactive commands keep working and Ctrl-C reaches the command) and handed back on every exit path; Ctrl-Z is not supported in that case. The exit status follows the command (130 or 143 after those signals), and the command is always reaped.
+- **Terminal on stdin:** with a terminal on stdin (an interactive human session; agents almost never have one), `spillway run` replaces itself with the command, in either mode: nothing is measured, stored or recorded, and the command's exit status is unchanged.
+- **Signals:** SIGINT and SIGTERM sent to `spillway run` are forwarded to the command. The command runs in its own process group and the whole group receives the signal. The exit status follows the command (130 or 143 after those signals), and the command is always reaped.
 - **Memory bound:** at most `--max-capture-bytes` (default 16 MiB, or `SPILLWAY_MAX_CAPTURE_BYTES`) are held in memory. Beyond that, output streams through unchanged and unbudgeted, with no receipt and no artifact, and the exit status is still the command's.
 - **Output errors:** if stdout cannot be written (full disk, closed pipe), `spillway run` prints one line to stderr, still drains and reaps the command, and exits with the command's status.
 - **Privacy:** shell receipts keep sizes, hashes, mode, exit code and counts (`error_location_count`, `diagnostic_clue_count`). They never contain output text, paths or clue lines, although the model-visible preview does.

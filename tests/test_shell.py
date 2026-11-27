@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import pty
 import re
+import select
 import signal
 import subprocess
 import sys
@@ -37,6 +38,7 @@ def run_cli(*args, log_dir=None, env_extra=None):
     return subprocess.run(
         [sys.executable, "-m", "spillway.cli", *args],
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         cwd=str(ROOT),
         env=env,
         timeout=60,
@@ -401,7 +403,8 @@ class StatsTests(unittest.TestCase):
 
 def run_inprocess(argv, stdin_free=True):
     emitted = []
-    with mock.patch("spillway.shell._emit", side_effect=lambda data: emitted.append(bytes(data))):
+    with mock.patch("spillway.shell._emit", side_effect=lambda data: emitted.append(bytes(data))), \
+            mock.patch("spillway.shell.os.isatty", return_value=False):
         code = shell.run_main(argv)
     return code, b"".join(emitted)
 
@@ -575,7 +578,7 @@ class RobustnessTests(unittest.TestCase):
                     proc = subprocess.run(
                         [sys.executable, "-m", "spillway.cli", "run", "--mode", mode, "--log-dir", tmp, "--",
                          *py("import sys; print('hello'); sys.exit(7)")],
-                        stdout=full, stderr=subprocess.PIPE, cwd=str(ROOT), env=env, timeout=60,
+                        stdin=subprocess.DEVNULL, stdout=full, stderr=subprocess.PIPE, cwd=str(ROOT), env=env, timeout=60,
                     )
                 self.assertEqual(proc.returncode, 7, mode)
                 self.assertNotIn(b"Traceback", proc.stderr)
@@ -592,7 +595,7 @@ class RobustnessTests(unittest.TestCase):
             with open("/dev/full", "wb") as full:
                 proc = subprocess.run(
                     [sys.executable, "-m", "spillway.cli", "read", digest, "--log-dir", tmp],
-                    stdout=full, stderr=subprocess.PIPE, cwd=str(ROOT), env=env, timeout=60,
+                    stdin=subprocess.DEVNULL, stdout=full, stderr=subprocess.PIPE, cwd=str(ROOT), env=env, timeout=60,
                 )
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn(b"Traceback", proc.stderr)
@@ -668,138 +671,97 @@ class RobustnessTests(unittest.TestCase):
         self.assertEqual(summary["shell_enforced_spilled"], 0)
 
 
-TTY_SHIM = (
-    "import fcntl, os, signal, subprocess, sys, termios\n"
-    "fcntl.ioctl(0, termios.TIOCSCTTY, 0)\n"
-    "signal.signal(signal.SIGTTOU, signal.SIG_IGN)\n"
-    "job = subprocess.Popen(sys.argv[4:], process_group=0)\n"
-    "if sys.argv[3] == 'job':\n"
-    "    os.tcsetpgrp(0, job.pid)\n"
-    "open(sys.argv[1], 'w').write(str(job.pid))\n"
-    "rc = job.wait()\n"
-    "home = job.pid if sys.argv[3] == 'job' else os.getpgrp()\n"
-    "open(sys.argv[2], 'w').write('%d %d %d' % (rc, os.tcgetpgrp(0), home))\n"
-)
-
-WAITER = (
-    "import os, signal, subprocess, sys\n"
-    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
-    "g = subprocess.Popen(['sleep', '60'])\n"
-    "open(sys.argv[1] + '.tmp', 'w').write('%d %d' % (os.getpid(), g.pid))\n"
-    "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
-    "g.wait()\n"
-)
-
-
-def wait_for_file(path, timeout=20.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if path.exists():
-            return True
-        time.sleep(0.05)
-    return False
-
-
-@unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "POSIX ptys and /proc")
-class TtyStdinTests(unittest.TestCase):
-    def _start(self, tmp, run_args, command, foreground="job"):
+def run_on_pty(args, feed=b"", timeout=20.0):
+    try:
+        master, slave = pty.openpty()
+    except OSError:
+        raise unittest.SkipTest("no pty available")
+    env = dict(os.environ, PYTHONPATH=str(ROOT))
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "spillway.cli", "run", *args],
+        stdin=slave, stdout=slave, stderr=slave, cwd=str(ROOT), env=env,
+    )
+    os.close(slave)
+    chunks = []
+    try:
+        if feed:
+            os.write(master, feed)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ready, _, _ = select.select([master], [], [], 0.2)
+            if ready:
+                try:
+                    data = os.read(master, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+            elif proc.poll() is not None:
+                break
         try:
-            master, slave = pty.openpty()
-        except OSError:
-            self.skipTest("no pty available")
-        tmp = Path(tmp)
-        env = dict(os.environ, PYTHONPATH=str(ROOT))
-        shim = subprocess.Popen(
-            [sys.executable, "-c", TTY_SHIM, str(tmp / "jobpid"), str(tmp / "result"), foreground, sys.executable, "-m",
-             "spillway.cli", "run", *run_args, "--log-dir", str(tmp / "logs"), "--", *command],
-            stdin=slave, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=str(ROOT), env=env,
-            start_new_session=True,
-        )
-        os.close(slave)
-        return master, shim
-
-    def _finish(self, master, shim, pids):
-        for pid in pids:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-        if shim.poll() is None:
-            shim.kill()
-        shim.wait()
+            rc = proc.wait(timeout=max(0.1, deadline - time.time()))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise AssertionError("spillway run did not exit on a pty")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
         os.close(master)
+    return rc, b"".join(chunks).replace(b"\r\n", b"\n")
 
-    def test_signal_to_wrapper_with_tty_stdin_reaches_descendants_and_restores_terminal(self):
-        for mode in ("shadow", "enforce"):
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                with tempfile.TemporaryDirectory() as tmp:
-                    pidfile = Path(tmp) / "pids"
-                    master, shim = self._start(
-                        tmp, ["--mode", mode], [sys.executable, "-c", WAITER, str(pidfile)]
-                    )
-                    pids = []
-                    try:
-                        self.assertTrue(wait_for_file(Path(tmp) / "jobpid"), (mode, sig))
-                        self.assertTrue(wait_for_file(pidfile), (mode, sig))
-                        pids = [int(v) for v in pidfile.read_text().split()]
-                        wrapper_pid = int((Path(tmp) / "jobpid").read_text())
-                        os.kill(wrapper_pid, sig)
-                        try:
-                            shim.wait(timeout=20)
-                        except subprocess.TimeoutExpired:
-                            self.fail("wrapper did not exit: %s %s" % (mode, sig))
-                        rc, foreground, job = (int(v) for v in (Path(tmp) / "result").read_text().split())
-                        self.assertEqual(rc, 128 + int(sig), (mode, sig))
-                        self.assertEqual(foreground, job, (mode, sig))
-                        self.assertTrue(wait_dead(pids), (mode, sig))
-                    finally:
-                        self._finish(master, shim, pids)
 
-    def test_wrapper_running_as_a_background_job_still_signals_descendants(self):
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            with tempfile.TemporaryDirectory() as tmp:
-                pidfile = Path(tmp) / "pids"
-                master, shim = self._start(tmp, [], [sys.executable, "-c", WAITER, str(pidfile)], foreground="shell")
-                pids = []
-                try:
-                    self.assertTrue(wait_for_file(Path(tmp) / "jobpid"), sig)
-                    self.assertTrue(wait_for_file(pidfile), sig)
-                    pids = [int(v) for v in pidfile.read_text().split()]
-                    os.kill(int((Path(tmp) / "jobpid").read_text()), sig)
-                    try:
-                        shim.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        self.fail("wrapper did not exit: %s" % sig)
-                    rc, foreground, home = (int(v) for v in (Path(tmp) / "result").read_text().split())
-                    self.assertEqual(rc, 128 + int(sig), sig)
-                    self.assertEqual(foreground, home, sig)
-                    self.assertTrue(wait_dead(pids), sig)
-                finally:
-                    self._finish(master, shim, pids)
-
-    def test_command_keeps_terminal_access_and_terminal_is_restored(self):
-        code = (
-            "import sys\n"
-            "line = input()\n"
-            "open(sys.argv[1], 'w').write(line)\n"
-        )
+@unittest.skipUnless(os.name == "posix", "POSIX ptys")
+class TtyStdinPassthroughTests(unittest.TestCase):
+    def test_output_reaches_the_terminal_unchanged_and_nothing_is_recorded(self):
+        expected = "".join("row %d xxxxxxxxxx\n" % i for i in range(3000)).encode("utf-8")
+        code = "for i in range(3000): print('row', i, 'xxxxxxxxxx')"
         for mode in ("shadow", "enforce"):
             with tempfile.TemporaryDirectory() as tmp:
-                out = Path(tmp) / "typed"
-                master, shim = self._start(tmp, ["--mode", mode], [sys.executable, "-c", code, str(out)])
-                try:
-                    self.assertTrue(wait_for_file(Path(tmp) / "jobpid"), mode)
-                    os.write(master, b"hello\n")
-                    try:
-                        shim.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        self.fail("wrapper did not exit: " + mode)
-                    rc, foreground, job = (int(v) for v in (Path(tmp) / "result").read_text().split())
-                    self.assertEqual(rc, 0, mode)
-                    self.assertEqual(foreground, job, mode)
-                    self.assertEqual(out.read_text(), "hello", mode)
-                finally:
-                    self._finish(master, shim, [])
+                logs = Path(tmp) / "logs"
+                rc, out = run_on_pty(["--mode", mode, "--cap", "512", "--log-dir", str(logs), "--", *py(code)])
+                self.assertEqual(rc, 0, mode)
+                self.assertEqual(out, expected, mode)
+                self.assertFalse(logs.exists(), mode)
+
+    def test_exit_status_passes_through(self):
+        for mode in ("shadow", "enforce"):
+            with tempfile.TemporaryDirectory() as tmp:
+                base = ["--mode", mode, "--log-dir", str(Path(tmp) / "logs"), "--"]
+                self.assertEqual(run_on_pty([*base, *py("pass")])[0], 0, mode)
+                self.assertEqual(run_on_pty([*base, *py("import sys; sys.exit(7)")])[0], 7, mode)
+                rc, _ = run_on_pty([*base, *py("import os, signal; os.kill(os.getpid(), signal.SIGTERM)")])
+                self.assertIn(rc, (-int(signal.SIGTERM), 128 + int(signal.SIGTERM)), mode)
+                rc, out = run_on_pty([*base, "spillway-no-such-command-xyz"])
+                self.assertEqual(rc, 127, mode)
+                self.assertIn(b"command not found", out)
+                plain = Path(tmp) / "not-executable"
+                plain.write_text("x", encoding="utf-8")
+                os.chmod(plain, 0o644)
+                rc, out = run_on_pty([*base, str(plain)])
+                self.assertEqual(rc, 126, mode)
+                self.assertNotIn(b"Traceback", out)
+                self.assertFalse((Path(tmp) / "logs").exists(), mode)
+
+    def test_interactive_read_from_the_terminal_works(self):
+        code = "name = input('name? ')\nprint('got ' + name)\nraise SystemExit(4)"
+        for mode in ("shadow", "enforce"):
+            with tempfile.TemporaryDirectory() as tmp:
+                logs = Path(tmp) / "logs"
+                rc, out = run_on_pty(
+                    ["--mode", mode, "--log-dir", str(logs), "--", *py(code)], feed=b"hello\n"
+                )
+                self.assertEqual(rc, 4, mode)
+                self.assertIn(b"name? ", out)
+                self.assertIn(b"got hello\n", out)
+                self.assertFalse(logs.exists(), mode)
+
+    def test_help_says_a_terminal_on_stdin_means_passthrough(self):
+        proc = run_cli("run", "--help")
+        self.assertIn(b"terminal", proc.stdout)
+        self.assertIn(b"passthrough", proc.stdout)
 
 
 class HelpTests(unittest.TestCase):
