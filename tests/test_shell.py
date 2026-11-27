@@ -409,6 +409,32 @@ def run_inprocess(argv, stdin_free=True):
     return code, b"".join(emitted)
 
 
+def read_bounded(stream, size, deadline_s=20.0):
+    """Reads up to size bytes (or to EOF) from a pipe, failing the test instead of blocking forever."""
+    fd = stream.fileno()
+    deadline = time.monotonic() + deadline_s
+    chunks = []
+    got = 0
+    while got < size:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AssertionError("timed out after %.0f s reading %d bytes from a pipe (got %d)" % (deadline_s, size, got))
+        ready, _, _ = select.select([fd], [], [], min(remaining, 0.5))
+        if not ready:
+            continue
+        data = os.read(fd, size - got)
+        if not data:
+            break
+        chunks.append(data)
+        got += len(data)
+    return b"".join(chunks)
+
+
+def drain_bounded(stream, deadline_s=20.0):
+    """Reads a pipe to EOF with a deadline."""
+    return read_bounded(stream, 1 << 30, deadline_s)
+
+
 def is_alive(pid):
     try:
         with open("/proc/%d/status" % pid, encoding="utf-8") as fh:
@@ -499,7 +525,7 @@ class RobustnessTests(unittest.TestCase):
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(ROOT), env=env,
             )
             try:
-                self.assertEqual(len(wrapper.stdout.read(100)), 100)
+                self.assertEqual(len(read_bounded(wrapper.stdout, 100)), 100)
                 wrapper.stdout.close()
                 rc = wrapper.wait(timeout=20)
             finally:
@@ -775,13 +801,13 @@ class TtyStdinPassthroughTests(unittest.TestCase):
                     )
                     os.close(slave)
                     try:
-                        self.assertEqual(len(proc.stdout.read(100)), 100)
+                        self.assertEqual(len(read_bounded(proc.stdout, 100)), 100)
                         proc.stdout.close()
                         try:
                             rc = proc.wait(timeout=20)
                         except subprocess.TimeoutExpired:
                             self.fail("did not exit: %s %s" % (mode, command))
-                        stderr = proc.stderr.read()
+                        stderr = drain_bounded(proc.stderr)
                     finally:
                         if proc.poll() is None:
                             proc.kill()

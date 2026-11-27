@@ -84,7 +84,7 @@ The MCP proxy defaults to `shadow` and **fails open**: on any internal error the
 
 ## Receipt fields
 
-The core (`apply_budget`) writes these fields. Adapters write them to `receipts.jsonl`, and no field contains output content.
+The core (`apply_budget`) produces these fields. Both adapters (`spillway mcp` and `spillway run`) write the content-free subset described below to `receipts.jsonl` through one shared allowlist, `content_free_receipt` in `spillway/artifacts.py`; `error_locations`, `diagnostic_clues`, `notes_shown`, `notes_marked` and `violations_before_failclose` exist only in the in-memory core receipt.
 
 | Field | Meaning |
 | --- | --- |
@@ -104,7 +104,7 @@ The core (`apply_budget`) writes these fields. Adapters write them to `receipts.
 | `violations_before_failclose` | Violations found before failing closed (normally `[]`) |
 | `policy_error`, `aggregate_bytes`, `aggregate_unsatisfiable` | Batch settlement only |
 
-Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). `spillway run` writes `source: "shell"` (and `adapter: "shell"`) and is content-free: `error_locations`, `diagnostic_clues` and `violations_before_failclose` are replaced by `error_location_count`, `diagnostic_clue_count` and `violation_count`, and `would_change` is true only when a verified preview carrying the artifact hash was delivered; receipts without `source` are treated as MCP by `spillway stats`. When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
+Written receipts keep `call_id`, `mode`, `kind`, `cap`, `rendered_bytes`, `rendered_sha256`, `original_bytes`, `original_lines`, `exit_code`, `media_parts`, `artifact_sha256`, `artifact_bytes`, `receipt_used` and `verified`, and replace `error_locations`, `diagnostic_clues` and `violations_before_failclose` with the counts `error_location_count`, `diagnostic_clue_count` and `violation_count`. `notes_shown` and `notes_marked` are not written. Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). `spillway run` writes `source: "shell"` (and `adapter: "shell"`), and its `would_change` is true only when a verified preview carrying the artifact hash was delivered; receipts without `source` are treated as MCP by `spillway stats`. When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
 
 ### Read events
 

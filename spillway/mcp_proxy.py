@@ -23,7 +23,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from . import facts as _facts
-from .artifacts import ArtifactStore, DEFAULT_MAX_ARTIFACTS, DEFAULT_MAX_ARTIFACT_BYTES
+from .artifacts import ArtifactStore, DEFAULT_MAX_ARTIFACTS, DEFAULT_MAX_ARTIFACT_BYTES, content_free_receipt
 from .budget import MIN_RESULT_CAP, Policy, apply_budget
 from .render import render
 from .sanitize import neutralize_body
@@ -181,7 +181,7 @@ class Proxy:
         )
         changed = out.mode not in ("full", "control")
         rec = dict(
-            out.receipt,
+            content_free_receipt(out.receipt),
             ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             tool=tool,
             adapter="mcp_proxy",
