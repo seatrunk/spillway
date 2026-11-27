@@ -17,6 +17,7 @@ from .budget import MIN_RESULT_CAP, Policy, apply_budget
 from .sanitize import neutralize_body
 
 SOURCE = "shell"
+_INTERPRETER_IGNORED_SIGNALS = ("SIGPIPE", "SIGXFZ", "SIGXFSZ")
 DEFAULT_READ_LIMIT = 8192
 DEFAULT_MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 SHELL_ARTIFACT_HINT = "artifact sha256={sha256} (recover: spillway read <sha256>{log_dir} --offset N --limit N)"
@@ -207,6 +208,13 @@ def _budget_and_record(data: bytes, status: int, args: argparse.Namespace, store
 
 def _passthrough(cmd: List[str]) -> int:
     """Replaces this process with the command: nothing is captured, budgeted, stored or recorded."""
+    for name in _INTERPRETER_IGNORED_SIGNALS:
+        signum = getattr(signal, name, None)
+        if signum is not None:
+            try:
+                signal.signal(signum, signal.SIG_DFL)
+            except (OSError, ValueError):
+                pass
     try:
         os.execvp(cmd[0], cmd)
     except FileNotFoundError:

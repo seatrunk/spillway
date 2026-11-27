@@ -12,7 +12,7 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 - **`spillway stats`:** reports `by_source`, `reads`, `shell_enforced_spilled`, `shell_enforced_recovered` and `recovery_rate` (share of enforced shell results whose artifact was read later).
 
 - **Robust shell wrapper:** capture is bounded (`--max-capture-bytes`, default 16 MiB; overflow streams through unbudgeted); SIGINT and SIGTERM are forwarded to the command's process group and the command is always reaped; stdout write failures keep the command's exit status and print no traceback; a `failclosed` core outcome or any result without a verified artifact pointer fails open to the original output; `--wrap-untrusted` also wraps and neutralizes results that fit the cap.
-- **Terminal stdin:** with a terminal on stdin, `spillway run` is a plain passthrough in both modes (it execs the command: no capture, budget, artifact or receipt). Interactive use and job control behave as without Spillway; the non-terminal path is unchanged.
+- **Terminal stdin:** with a terminal on stdin, `spillway run` is a plain passthrough in both modes (it execs the command: no capture, budget, artifact or receipt, and the signal dispositions Python changes, such as SIGPIPE, are restored first). Interactive use and job control behave as without Spillway; the non-terminal path is unchanged.
 - **Content-free shell receipts:** shell receipts keep counts instead of `error_locations`, `diagnostic_clues` and violation strings. `spillway stats` skips recognized rows whose fields have the wrong type.
 
 The MCP path, the core and `benchmarks/replay/results/offline-replay.json` are unchanged.

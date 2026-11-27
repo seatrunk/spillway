@@ -758,6 +758,52 @@ class TtyStdinPassthroughTests(unittest.TestCase):
                 self.assertIn(b"got hello\n", out)
                 self.assertFalse(logs.exists(), mode)
 
+    def test_closed_stdout_pipe_dies_by_sigpipe_like_a_direct_run(self):
+        env = dict(os.environ, PYTHONPATH=str(ROOT))
+        for mode in ("shadow", "enforce"):
+            for command in (["yes"], ["sh", "-c", "while :; do echo x; done"]):
+                with tempfile.TemporaryDirectory() as tmp:
+                    logs = Path(tmp) / "logs"
+                    try:
+                        master, slave = pty.openpty()
+                    except OSError:
+                        self.skipTest("no pty available")
+                    proc = subprocess.Popen(
+                        [sys.executable, "-m", "spillway.cli", "run", "--mode", mode, "--log-dir", str(logs),
+                         "--", *command],
+                        stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(ROOT), env=env,
+                    )
+                    os.close(slave)
+                    try:
+                        self.assertEqual(len(proc.stdout.read(100)), 100)
+                        proc.stdout.close()
+                        try:
+                            rc = proc.wait(timeout=20)
+                        except subprocess.TimeoutExpired:
+                            self.fail("did not exit: %s %s" % (mode, command))
+                        stderr = proc.stderr.read()
+                    finally:
+                        if proc.poll() is None:
+                            proc.kill()
+                            proc.wait()
+                        proc.stderr.close()
+                        os.close(master)
+                    self.assertEqual(rc, -int(signal.SIGPIPE), (mode, command, stderr))
+                    self.assertEqual(stderr, b"")
+                    self.assertFalse(logs.exists())
+
+    @unittest.skipUnless(os.path.exists("/proc/self/status"), "needs /proc")
+    def test_commands_do_not_inherit_ignored_sigpipe_on_either_path(self):
+        probe = "grep SigIgn /proc/self/status"
+        sigpipe_bit = 1 << (int(signal.SIGPIPE) - 1)
+        for mode in ("shadow", "enforce"):
+            with tempfile.TemporaryDirectory() as tmp:
+                base = ["--mode", mode, "--log-dir", str(Path(tmp) / "logs"), "--", "sh", "-c", probe]
+                _, out = run_on_pty(base)
+                self.assertEqual(int(out.split()[-1], 16) & sigpipe_bit, 0, ("tty", mode, out))
+                proc = run_cli("run", *base)
+                self.assertEqual(int(proc.stdout.split()[-1], 16) & sigpipe_bit, 0, ("pipe", mode, proc.stdout))
+
     def test_help_says_a_terminal_on_stdin_means_passthrough(self):
         proc = run_cli("run", "--help")
         self.assertIn(b"terminal", proc.stdout)
