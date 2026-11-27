@@ -8,6 +8,10 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from spillway.mcp_proxy import Proxy
 FAKE = Path(__file__).with_name("fake_mcp_server.py")
 
 
@@ -220,6 +224,39 @@ class McpProxy(unittest.TestCase):
             self.assertIn('"would_change": true', receipts)
             self.assertNotIn("xxxxxxxx", receipts)
             self.assertFalse(Path(tmp, "artifacts").exists())
+
+    def test_receipts_hold_no_output_text_or_paths(self):
+        secret = "synthetic-secret-token-123"
+        pad = "padding line\n" * 3000
+        path_body = (
+            pad + "Traceback (most recent call last):\n"
+            '  File "/synthetic/secret_dir_abc/mod.py", line 9, in f\n'
+            "ValueError: nope\n"
+        )
+        clue_body = pad + "ERROR: " + secret + "\n"
+        for mode in ("shadow", "enforce"):
+            with tempfile.TemporaryDirectory() as tmp:
+                proxy = Proxy(mode, Path(tmp), 4096)
+                for rid, body in ((7, path_body), (8, clue_body)):
+                    proxy.from_client(json.dumps({"jsonrpc": "2.0", "id": rid, "method": "tools/call",
+                                                  "params": {"name": "big", "arguments": {}}}))
+                    proxy.from_server(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {
+                        "content": [{"type": "text", "text": body}], "isError": True}}))
+                text = Path(tmp, "receipts.jsonl").read_text(encoding="utf-8")
+                for needle in (secret, "secret_dir_abc", "mod.py", "ValueError", "padding line", "/synthetic"):
+                    self.assertNotIn(needle, text, (mode, needle))
+                rows = [json.loads(line) for line in text.splitlines()]
+                self.assertEqual(len(rows), 2)
+                for row in rows:
+                    for key in ("error_locations", "diagnostic_clues", "violations_before_failclose",
+                                "notes_shown", "notes_marked"):
+                        self.assertNotIn(key, row, (mode, key))
+                    self.assertEqual(row["tool"], "big")
+                    self.assertTrue(row["verified"])
+                    self.assertEqual(row["violation_count"], 0)
+                self.assertEqual(rows[0]["call_id"], "mcp-7")
+                self.assertEqual(rows[0]["error_location_count"], 1)
+                self.assertEqual(rows[1]["diagnostic_clue_count"], 1)
 
 
 if __name__ == "__main__":

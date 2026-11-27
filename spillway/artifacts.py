@@ -17,6 +17,11 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)  # a FIFO planted at an artifact path must not block open()
 
+RECEIPT_KEEP = (
+    "call_id", "mode", "kind", "cap", "rendered_bytes", "rendered_sha256", "original_bytes", "original_lines",
+    "exit_code", "media_parts", "artifact_sha256", "artifact_bytes", "receipt_used", "verified",
+)
+
 DEFAULT_MAX_ARTIFACTS = 200
 DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024  # 100 MiB
 
@@ -40,6 +45,15 @@ def _fchmod_private(fd: int) -> None:
             os.fchmod(fd, 0o600)
         except OSError:
             pass
+
+
+def content_free_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    """Keeps sizes, hashes, mode, exit code and counts; drops every field derived from output text."""
+    rec = {key: receipt[key] for key in RECEIPT_KEEP if key in receipt}
+    rec["error_location_count"] = len(receipt.get("error_locations") or [])
+    rec["diagnostic_clue_count"] = len(receipt.get("diagnostic_clues") or [])
+    rec["violation_count"] = len(receipt.get("violations_before_failclose") or [])
+    return rec
 
 
 class ArtifactStore:

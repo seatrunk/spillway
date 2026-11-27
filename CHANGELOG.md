@@ -15,7 +15,12 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 - **Terminal stdin:** with a terminal on stdin, `spillway run` is a plain passthrough in both modes (it execs the command: no capture, budget, artifact or receipt, and the signal dispositions Python changes, such as SIGPIPE, are restored first). Interactive use and job control behave as without Spillway; the non-terminal path is unchanged.
 - **Content-free shell receipts:** shell receipts keep counts instead of `error_locations`, `diagnostic_clues` and violation strings. `spillway stats` skips recognized rows whose fields have the wrong type.
 
-The MCP path, the core and `benchmarks/replay/results/offline-replay.json` are unchanged.
+### Changed
+
+- **Content-free MCP receipts:** the MCP proxy now writes receipts through the same allowlist as `spillway run` (`content_free_receipt` in `spillway/artifacts.py`). `error_locations` (file paths), `diagnostic_clues` (output lines), `violations_before_failclose` and `notes_shown`/`notes_marked` are no longer written to `receipts.jsonl`; `error_location_count`, `diagnostic_clue_count` and `violation_count` take their place. Every field `spillway stats` reads is unchanged.
+- **Test hardening:** the SIGPIPE pty tests read the wrapper's pipes with a 20 s deadline, so a hung command fails the test instead of stalling the suite.
+
+Model-visible output, the core and `benchmarks/replay/results/offline-replay.json` are unchanged.
 
 ## [0.5.0] — 2026-11-26
 

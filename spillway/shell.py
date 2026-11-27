@@ -12,7 +12,9 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
-from .artifacts import ArtifactStore, DEFAULT_MAX_ARTIFACTS, DEFAULT_MAX_ARTIFACT_BYTES, is_valid_sha256
+from .artifacts import (
+    ArtifactStore, DEFAULT_MAX_ARTIFACTS, DEFAULT_MAX_ARTIFACT_BYTES, content_free_receipt, is_valid_sha256,
+)
 from .budget import MIN_RESULT_CAP, Policy, apply_budget
 from .sanitize import neutralize_body
 
@@ -21,10 +23,6 @@ _INTERPRETER_IGNORED_SIGNALS = ("SIGPIPE", "SIGXFZ", "SIGXFSZ")
 DEFAULT_READ_LIMIT = 8192
 DEFAULT_MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 SHELL_ARTIFACT_HINT = "artifact sha256={sha256} (recover: spillway read <sha256>{log_dir} --offset N --limit N)"
-_RECEIPT_KEEP = (
-    "call_id", "mode", "kind", "cap", "rendered_bytes", "rendered_sha256", "original_bytes", "original_lines",
-    "exit_code", "media_parts", "artifact_sha256", "artifact_bytes", "receipt_used", "verified",
-)
 
 
 def _env(primary: str, legacy: str, default: str) -> str:
@@ -156,15 +154,6 @@ def _pump(proc: subprocess.Popen, fwd: _Forwarder, sink: _Sink, enforce: bool, l
     return chunks, overflow
 
 
-def _content_free(receipt: Dict[str, Any]) -> Dict[str, Any]:
-    """Keeps sizes, hashes, mode, exit code and counts; drops every field derived from output text."""
-    rec = {key: receipt[key] for key in _RECEIPT_KEEP if key in receipt}
-    rec["error_location_count"] = len(receipt.get("error_locations") or [])
-    rec["diagnostic_clue_count"] = len(receipt.get("diagnostic_clues") or [])
-    rec["violation_count"] = len(receipt.get("violations_before_failclose") or [])
-    return rec
-
-
 def _budget_and_record(data: bytes, status: int, args: argparse.Namespace, store: ArtifactStore) -> Optional[bytes]:
     """Budgets one result, stores the artifact only for a delivered preview, records a receipt; None means print the original."""
     enforce = args.mode == "enforce"
@@ -189,7 +178,7 @@ def _budget_and_record(data: bytes, status: int, args: argparse.Namespace, store
     )
     wrapped_full = enforce and args.wrap_untrusted and out.mode == "full" and verified and bool(text)
     rec = dict(
-        _content_free(out.receipt),
+        content_free_receipt(out.receipt),
         ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         tool=SOURCE,
         adapter=SOURCE,
