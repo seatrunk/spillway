@@ -7,13 +7,19 @@
 
 **Cap oversized tool output for LLM agents without losing the clues that matter.** Spillway turns huge build logs, tracebacks, and tool payloads into bounded previews that keep exit codes, `file:line` locations, and head/tail context while saving the complete original locally for paginated recovery.
 
+![Spillway overview: a 37,315-byte, 502-line synthetic Rust build failure (rust_cargo_mid, 640 B cap) is bounded by Spillway's core into a 518-byte unwrapped verified preview keeping exit_code=101, crates/store/src/lib.rs:88, and head/tail lines while storing the complete unredacted original in local 0600 artifacts for offset/limit recovery; v0.5.0 defaults to shadow mode with enforce experimental.](docs/assets/hero.png)
+
 > **Status: experimental (`v0.5.0`).** Defaults to **`shadow`** (measures and logs; original output passes through unchanged). **`enforce` is experimental and not production-approved** — see [rollout gates](docs/rollout.md) and [project status](docs/project-status.md).
 
 ## Before and after
 
-Synthetic Rust build failure from [`benchmarks/replay/fixtures/rust_cargo_mid.json`](benchmarks/replay/fixtures/rust_cargo_mid.json): **37,315 bytes, 502 lines**, `exit_code=101`, capped here at **640 bytes** (default cap is 16,384 bytes).
+Synthetic Rust build failure from [`benchmarks/replay/fixtures/rust_cargo_mid.json`](benchmarks/replay/fixtures/rust_cargo_mid.json): **37,315 bytes, 502 lines**, `exit_code=101` (`error[E0308]` at line 251, `crates/store/src/lib.rs:88:9` at line 252), capped here at **640 bytes** (default cap is 16,384 bytes).
 
-**Plain head truncation at 640 B (excerpt)** — cuts mid-line at `Compiling 00008 dddifhag` and drops `exit_code=101`, `error[E0308]`, and `crates/store/src/lib.rs:88`:
+![Illustrative reconstruction comparing a 640-byte naive head truncation against Spillway's core preview on the synthetic rust_cargo_mid fixture (37,315 bytes, 502 lines): naive head truncation cuts mid-line at Compiling 00008 dddifhag and discards error[E0308] and crates/store/src/lib.rs:88 at lines 251-252, while Spillway's core preview measures 518 bytes unwrapped (567 bytes framed), retains exit_code=101, crates/store/src/lib.rs:88, SHA-256, and head/tail lines, and recovers the exact error via spillway read at offset 19250 limit 64.](docs/assets/before-after.png)
+
+*Illustrative reconstruction of Spillway's core preview (`apply_budget` default: 518 B unwrapped visible text, 567 B with `<untrusted_tool_result>` framing), not a screenshot of `spillway run`. The shell adapter embeds a longer recovery command in its header and selects different head/tail lines (543 B unwrapped below). Note also that a runner reporting exit status separately (or prepending it) can preserve the exit code even when output text is truncated; cutting the text alone still loses mid-log diagnostics like `error[E0308]` and `crates/store/src/lib.rs:88`.*
+
+**Plain head truncation at 640 B (excerpt)** — cuts mid-line at `Compiling 00008 dddifhag` and drops `error[E0308]`, `crates/store/src/lib.rs:88`, and any exit code not reported separately by the runner:
 
 ```text
 Compiling 00000 ehbg fjji bafeghcichgecechdfdej abecbdfg cghgbiehcdcebdgdbbf
@@ -22,7 +28,7 @@ Compiling 00001 fheacfgdcgjgaffgcdcbahhd aggifad baedaceeibbiaeigdjjfjciaiec
 Compiling 00008 dddifhag
 ```
 
-**Spillway preview at 640 B (`spillway run --mode enforce --cap 640`, exact output)** — retains `exit_code=101`, `crates/store/src/lib.rs:88`, original bytes/lines, SHA-256, and line-aligned head/tail:
+**Spillway shell preview at 640 B (`spillway run --mode enforce --cap 640`, exact 543 B unwrapped output)** — retains `exit_code=101`, `crates/store/src/lib.rs:88`, original bytes/lines, SHA-256, and line-aligned head/tail:
 
 ```text
 [spillway preview] original 37315 bytes, 502 lines; exit_code=101; errors: crates/store/src/lib.rs:88; artifact sha256=1a6f9b8a0e5837c8385d86fb0a1929f6e3fbee36a7566b38b902070770fdeb25 (recover: spillway read <sha256> --offset N --limit N)
@@ -53,6 +59,8 @@ In MCP `enforce` mode, the proxy exposes `spillway_read_artifact` (`{"sha256": "
 
 Aggregate replay from [PR #23](https://github.com/seatrunk/spillway/pull/23) over **737 recorded shell and file-read tool results** from Claude Code, Codex, and Antigravity on one machine (**0 model calls** during replay; 2,447,196 B unbudgeted):
 
+![Real-session replay comparison from PR #23 across 737 shell and file-read tool outputs from Claude Code, Codex, and Antigravity (single machine, 0 model calls): at a 4 KiB cap (47.3% vs 48.0% bytes saved), Spillway keeps all file:line locations in 81/88 outputs (92%) and 282/291 individual references versus 56/88 (64%) and 176/291 for naive truncation; at an 8 KiB cap (27.7% vs 28.0% bytes saved), Spillway keeps 86/88 outputs (98%) and 288/291 references versus 67/88 (76%) and 212/291; known exit codes stay 129/129 in both arms. Measures bytes and diagnostic fidelity only, not tokens, cost, or task success.](docs/assets/benchmark.png)
+
 | Cap | Arm | Bytes saved | Results keeping all `file:line` refs | `file:line` refs kept | Exit codes kept |
 | --- | --- | ---: | ---: | ---: | ---: |
 | 4 KiB | `truncate` (head cut) | 47.3% | 56 / 88 | 176 / 291 | 129 / 129 |
@@ -72,7 +80,7 @@ python3 benchmarks/replay/replay.py --out /tmp/offline-replay.json && cmp /tmp/o
 
 ## Quick start
 
-Requires Python 3.11+ with zero runtime dependencies. Spillway is not published on PyPI.
+Spillway's runtime uses only Python 3.11+ and the standard library (zero runtime dependencies; not published on PyPI). External tools shown in examples below (`pipx`, `pytest`, `npx`) are optional install or target commands, not Spillway dependencies.
 
 ```sh
 pipx install git+https://github.com/seatrunk/spillway
