@@ -170,4 +170,4 @@ python3 scripts/check_repo.py
 
 ## License
 
-[MIT](LICENSE) © Ricardo Margalho. Contributions are welcome; please follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+[MIT](LICENSE) © Margalho. Contributions are welcome; please follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
