@@ -18,7 +18,7 @@ null, a known key or a fixed vocabulary word before anything is printed or writt
 names, prompts and tool output never reach stdout, stderr (except for a user-supplied option) or disk.
 
 Usage:
-    python3 benchmarks/real/real_replay.py [--caps 16384,4096] [--out benchmarks/real/results/real-replay.json]
+    python3 benchmarks/real/real_replay.py [--caps 2048,4096,8192,16384] [--out benchmarks/real/results/real-replay.json]
 """
 import argparse
 import collections
@@ -40,7 +40,7 @@ HARNESSES = ("claude_code", "codex", "agy")
 KINDS = ("shell", "file_read")
 ARMS = ("none", "truncate", "spillway")
 MODES = ("full", "preview", "marker", "withheld", "failclosed", "control")
-DEFAULT_CAPS = (16384, 4096)
+DEFAULT_CAPS = (2048, 4096, 8192, 16384)
 MAX_LOCATIONS = 5
 DEFAULT_OUT = Path(__file__).with_name("results") / "real-replay.json"
 
@@ -437,10 +437,10 @@ def replay(results: Iterator[Result], caps: List[int], scan: Dict[str, collectio
 
 def _caps(value: str) -> List[int]:
     try:
-        caps = sorted({int(part) for part in value.split(",") if part.strip()}, reverse=True)
+        caps = sorted({int(part) for part in value.split(",") if part.strip()})
     except ValueError:
         raise argparse.ArgumentTypeError("caps must be comma-separated integers")
-    if not caps or caps[-1] < MIN_RESULT_CAP:
+    if not caps or caps[0] < MIN_RESULT_CAP:
         raise argparse.ArgumentTypeError("each cap must be at least %d bytes" % MIN_RESULT_CAP)
     return caps
 

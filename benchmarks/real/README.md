@@ -3,7 +3,8 @@
 Measures the Spillway core on tool results that **already exist on your machine**, instead of synthetic fixtures. It runs locally, calls no model and uses no network. It prints and writes **aggregate numbers only**.
 
 ```sh
-python3 benchmarks/real/real_replay.py                       # caps 16384 and 4096 bytes
+python3 benchmarks/real/real_replay.py                       # caps 2048, 4096, 8192 and 16384 bytes
+python3 benchmarks/real/real_replay.py --caps 2048,4096,8192,16384
 python3 benchmarks/real/real_replay.py --caps 16384          # one cap (each cap must be at least 256)
 python3 benchmarks/real/real_replay.py --out /tmp/report.json
 ```

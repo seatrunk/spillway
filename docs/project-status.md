@@ -5,7 +5,7 @@
 ## v0.5.0 (re-target, issue #20)
 
 - **Removed:** the Hermes plugin (`adapters/hermes/`), its installer, tests and docs, the `SPILLWAY_FRAMING_RESERVE` setting that only it used, and every reference to the Hermes runtime. The pure core and the MCP proxy are unchanged.
-- **Fixed:** the CI badge, clone URLs and links still pointed at the old `context-budget-guard` repository name.
+- **Fixed:** the CI badge, clone URLs and links still pointed at the old repository name.
 - **Added:** [`benchmarks/real/`](../benchmarks/real/README.md), a stdlib-only local replay that reads Claude Code, Codex and Antigravity transcripts on the machine, runs `none`, `truncate` and `spillway` arms over their shell and file-read results, and writes **aggregate numbers only**. Nothing from real transcripts is committed (`benchmarks/real/results/` is git-ignored).
 - The offline replay is unchanged: 12 synthetic cases, 62 oracle checks. Candidate 62/62; unbudgeted 46/62; emulated historical spill 43/62.
 
