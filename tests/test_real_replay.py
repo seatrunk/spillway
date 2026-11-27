@@ -50,7 +50,7 @@ def claude_lines():
         use("t1", "Bash"), failing,
         use("t2", "Read"), result("t2", [{"type": "text", "text": "     1\tprint('SENTINEL_BODY')"}]),
         use("t3", "Edit"), result("t3", "The file has been updated SENTINEL_BODY"),
-        failing,  # the same result copied into a resumed session
+        failing,
         use("t4", "Bash"), result("t4", "ok SENTINEL_BODY"),
     ]
 
@@ -81,7 +81,6 @@ def agy_files(base):
     read = {"step_index": 3, "type": "GENERIC", "content": "Showing lines 1-3 of 3\n1: SENTINEL_BODY"}
     write_jsonl(logs / "chunks" / "transcript_full" / "a.jsonl", [
         {"step_index": 0, "type": "USER_INPUT", "content": "SENTINEL_AGY_PROMPT"}, plan, shell, read])
-    # A truncated copy: step 2 duplicates the full one, step 4 exists only here and must be skipped.
     write_jsonl(logs / "b.jsonl", [
         dict(shell, content="Command exited with code 7.\n[truncated]", truncated_fields=["content"]),
         {"step_index": 4, "type": "GENERIC", "content": "truncated only", "truncated_fields": ["content"]},
@@ -113,10 +112,32 @@ class Extraction(unittest.TestCase):
         self.assertEqual([(r.kind, r.exit_code) for r in codex], [("shell", None), ("shell", 3)])
         self.assertEqual([(r.kind, r.exit_code) for r in agy], [("shell", 7), ("file_read", None)])
         self.assertEqual(stats["claude_code"]["duplicates_skipped"], 1)
-        self.assertEqual(stats["claude_code"]["results_not_scored"], 1)  # the Edit result
-        self.assertEqual(stats["codex"]["results_not_scored"], 1)  # apply_patch
-        self.assertEqual(stats["agy"]["steps_truncated_skipped"], 1)  # the only-truncated step; the copy lost to transcript_full
+        self.assertEqual(stats["claude_code"]["results_not_scored"], 1)
+        self.assertEqual(stats["codex"]["results_not_scored"], 1)
+        self.assertEqual(stats["agy"]["steps_truncated_skipped"], 1)
         self.assertEqual(stats["claude_code"]["files_read"], 1)
+
+
+class ExitCodeBounds(unittest.TestCase):
+    def test_absurdly_long_exit_codes_are_ignored_not_raised(self):
+        digits = "9" * 5000
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            write_jsonl(home / ".claude/projects/p/s.jsonl", [
+                {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash"}]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "Exit code " + digits + "\nboom"}]}}])
+            write_jsonl(home / ".codex/sessions/r.jsonl", [
+                {"payload": {"type": "function_call", "call_id": "c1", "name": "shell"}},
+                {"payload": {"type": "function_call_output", "call_id": "c1", "output": "Exit code: " + digits}}])
+            write_jsonl(home / ".gemini/antigravity-cli/brain/b1/.system_generated/logs/chunks/transcript_full/a.jsonl", [
+                {"step_index": 1, "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "run_command"}]},
+                {"step_index": 2, "type": "GENERIC", "content": "Command exited with code " + digits + ".\n\nCommand output:\n"}])
+            roots = rr._roots(type("A", (), {"home": str(home), "claude_dir": [], "codex_dir": [], "agy_dir": []})())
+            found = [*rr.read_claude(roots["claude_code"], collections.Counter()),
+                     *rr.read_codex(roots["codex"], collections.Counter()),
+                     *rr.read_agy(roots["agy"], collections.Counter())]
+        self.assertEqual([(r.kind, r.exit_code) for r in found], [("shell", None)] * 3)
 
 
 class Arms(unittest.TestCase):
@@ -224,7 +245,8 @@ class Report(unittest.TestCase):
 
     def test_guard_rejects_free_text_unknown_keys_and_objects(self):
         for bad in ({"tool_results": "SENTINEL_BODY"}, {"SENTINEL_PROJECT": 1}, {"harnesses": ["/some/path"]},
-                    {"tool_results": object()}):
+                    {"tool_results": object()}, {"bytes": float("nan")}, {"bytes": float("inf")},
+                    {"arms": [float("-inf")]}, {"caps": {"\u0661\u0662\u0663": 1}}):
             with self.assertRaises(ValueError):
                 rr.assert_aggregate_only(bad)
         try:
@@ -232,6 +254,19 @@ class Report(unittest.TestCase):
         except ValueError as exc:
             self.assertNotIn("SENTINEL_BODY", str(exc))
         rr.assert_aggregate_only({"caps": {"16384": {"all": {"tool_results": 1, "arms": {"none": {"bytes": 3}}}}}})
+
+    def test_unwritable_out_path_fails_without_echoing_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "SENTINEL_PROJECT_dir"
+            target.mkdir()
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = rr.main(["--home", str(Path(tmp) / "empty-home"), "--out", str(target), "--caps", str(CAP)])
+        self.assertEqual(rc, 1)
+        for blob in (out.getvalue(), err.getvalue()):
+            self.assertNotIn(str(tmp), blob)
+            self.assertNotIn("SENTINEL_PROJECT", blob)
+        self.assertIn("could not write", err.getvalue())
 
     def test_caps_below_the_core_floor_are_rejected(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

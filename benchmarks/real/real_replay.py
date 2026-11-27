@@ -23,6 +23,7 @@ Usage:
 import argparse
 import collections
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -43,8 +44,6 @@ DEFAULT_CAPS = (16384, 4096)
 MAX_LOCATIONS = 5
 DEFAULT_OUT = Path(__file__).with_name("results") / "real-replay.json"
 
-# --- Aggregate-only guard -------------------------------------------------------------------------
-
 _SCAN_KEYS = ("files_read", "files_unreadable", "lines_skipped", "duplicates_skipped",
               "results_not_scored", "steps_truncated_skipped")
 ALLOWED_KEYS = frozenset(
@@ -64,7 +63,7 @@ def assert_aggregate_only(node) -> None:
     """
     if isinstance(node, dict):
         for key, value in node.items():
-            if not (key in ALLOWED_KEYS or (isinstance(key, str) and key.isdigit())):
+            if not (key in ALLOWED_KEYS or (isinstance(key, str) and key.isascii() and key.isdigit())):
                 raise ValueError("report contains an unknown key")
             assert_aggregate_only(value)
     elif isinstance(node, (list, tuple)):
@@ -73,11 +72,12 @@ def assert_aggregate_only(node) -> None:
     elif isinstance(node, str):
         if node not in ALLOWED_STRINGS:
             raise ValueError("report contains a free-text value")
-    elif node is not None and not isinstance(node, (bool, int, float)):
+    elif isinstance(node, float):
+        if not math.isfinite(node):
+            raise ValueError("report contains a non-finite number")
+    elif node is not None and not isinstance(node, (bool, int)):
         raise ValueError("report contains an unsupported value type")
 
-
-# --- Extraction -----------------------------------------------------------------------------------
 
 class Result:
     """One recorded tool result. Lives only in memory while it is scored."""
@@ -135,9 +135,9 @@ def _text_of(content) -> str:
     return ""
 
 
-_CLAUDE_EXIT = re.compile(r"Exit code (-?\d+)(?:\n|$)")
-_CODEX_EXIT = re.compile(r"(?:Exit code:|Process exited with code) (-?\d+)")
-_AGY_EXIT = re.compile(r"Command exited with code (-?\d+)")
+_CLAUDE_EXIT = re.compile(r"Exit code (-?\d{1,6})(?:\n|$)")
+_CODEX_EXIT = re.compile(r"(?:Exit code:|Process exited with code) (-?\d{1,6})(?!\d)")
+_AGY_EXIT = re.compile(r"Command exited with code (-?\d{1,6})(?!\d)")
 
 
 def _head(text: str, n: int = 2000) -> str:
@@ -285,8 +285,6 @@ def read_agy(bases: List[Path], stats: collections.Counter) -> Iterator[Result]:
                 yield Result("agy", kind, text, int(match.group(1)) if match else None)
 
 
-# --- Scoring --------------------------------------------------------------------------------------
-
 _EXT = (r"(?:py|pyi|ts|tsx|mts|cts|js|jsx|mjs|cjs|vue|svelte|rs|go|c|cc|cpp|cxx|h|hpp|cs|java|kt|swift|"
         r"scala|rb|php|pl|lua|zig|ex|exs|sh|bash|sql|json|toml|yaml|yml|md|css|scss|html)")
 _BOUND = r"(?<![\w./\\-])"
@@ -420,7 +418,6 @@ def replay(results: Iterator[Result], caps: List[int], scan: Dict[str, collectio
     for harness, info in harness_info.items():
         info["status"] = "read" if scan[harness]["files_read"] else "not_found"
         info["scan"] = {key: scan[harness][key] for key in _SCAN_KEYS}
-        # Every tool result the transcripts hold: the scored shell/file-read ones plus those not scored.
         info["tool_results_seen"] = (info["tool_results"] + scan[harness]["results_not_scored"]
                                      + scan[harness]["steps_truncated_skipped"])
     return {
@@ -437,8 +434,6 @@ def replay(results: Iterator[Result], caps: List[int], scan: Dict[str, collectio
                  for cap, t in tallies.items()},
     }
 
-
-# --- CLI ------------------------------------------------------------------------------------------
 
 def _caps(value: str) -> List[int]:
     try:
@@ -516,8 +511,13 @@ def main(argv=None) -> int:
 
     report = replay(everything(), args.caps, scan)
     assert_aggregate_only(report)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(report, indent=1, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    except OSError:
+        print(_format(report))
+        print("spillway real-session replay: could not write the report file; nothing was saved", file=sys.stderr)
+        return 1
     print(_format(report))
     return 0
 
