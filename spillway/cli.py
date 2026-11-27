@@ -1,7 +1,9 @@
-"""Unified CLI for Spillway: MCP stdio proxy, receipt telemetry summary, and artifact pruning.
+"""Unified CLI for Spillway: MCP stdio proxy, shell wrapper, artifact recovery, receipt summary, and pruning.
 
 Examples:
     spillway mcp --mode shadow -- npx -y @modelcontextprotocol/server-filesystem .
+    spillway run --mode enforce --cap 16384 -- pytest -x
+    spillway read <sha256> --offset 0 --limit 8192
     spillway --mode enforce --cap 16384 -- my-mcp-server
     spillway stats ~/.cache/spillway/receipts.jsonl
     spillway prune --log-dir ~/.cache/spillway --max-artifacts 100
@@ -31,6 +33,19 @@ def _default_log_dir() -> Path:
     return Path.home() / ".cache" / "spillway"
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _valid_result_row(obj: dict) -> bool:
+    """True when the fields stats aggregates have usable types."""
+    if not isinstance(obj.get("mode"), str) or not _is_number(obj.get("original_bytes")):
+        return False
+    if "rendered_bytes" in obj and not _is_number(obj["rendered_bytes"]):
+        return False
+    return all(isinstance(obj[k], str) for k in ("source", "adapter_mode", "artifact_sha256") if k in obj)
+
+
 def _cmd_stats(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(prog="spillway stats", description="Summarize a receipts.jsonl file.")
     ap.add_argument("receipts", nargs="?", type=Path, default=_default_log_dir() / "receipts.jsonl")
@@ -41,6 +56,8 @@ def _cmd_stats(argv: List[str]) -> int:
         print(f"spillway stats: file not found: {path}", file=sys.stderr)
         return 2
     rows = []
+    ordered = []
+    reads = 0
     skipped = 0
     with path.open(encoding="utf-8", errors="replace") as fh:
         for raw in fh:
@@ -53,10 +70,34 @@ def _cmd_stats(argv: List[str]) -> int:
                 skipped += 1
                 continue
             if isinstance(obj, dict) and "mode" in obj and "original_bytes" in obj:
-                rows.append(obj)
+                if _valid_result_row(obj):
+                    rows.append(obj)
+                    ordered.append(obj)
+                else:
+                    skipped += 1
+            elif isinstance(obj, dict) and obj.get("event") == "read":
+                if isinstance(obj.get("sha256"), str):
+                    reads += 1
+                    ordered.append(obj)
+                else:
+                    skipped += 1
     by_mode = {}
     for r in rows:
         by_mode[r["mode"]] = by_mode.get(r["mode"], 0) + 1
+    by_source = {}
+    for r in rows:
+        src = r.get("source") if isinstance(r.get("source"), str) else "mcp"
+        by_source[src] = by_source.get(src, 0) + 1
+    spilled = recovered = 0
+    pending_reads = set()
+    for obj in reversed(ordered):
+        if obj.get("event") == "read":
+            if isinstance(obj.get("sha256"), str):
+                pending_reads.add(obj["sha256"])
+        elif obj.get("source") == "shell" and obj.get("adapter_mode") == "enforce" and obj.get("would_change"):
+            spilled += 1
+            if obj.get("artifact_sha256") in pending_reads:
+                recovered += 1
     lat = sorted(r["elapsed_us"] for r in rows if isinstance(r.get("elapsed_us"), (int, float)))
     summary = {
         "total_results": len(rows),
@@ -65,6 +106,11 @@ def _cmd_stats(argv: List[str]) -> int:
         "bytes_after": sum(r.get("rendered_bytes", 0) for r in rows),
         "not_verified": sum(1 for r in rows if not r.get("verified", True) or r.get("mode") == "failclosed"),
         "by_mode": by_mode,
+        "by_source": by_source,
+        "reads": reads,
+        "shell_enforced_spilled": spilled,
+        "shell_enforced_recovered": recovered,
+        "recovery_rate": (recovered / spilled) if spilled else None,
         "skipped_lines": skipped,
         "latency_us": (
             {
@@ -85,6 +131,12 @@ def _cmd_stats(argv: List[str]) -> int:
             f"not_verified: {summary['not_verified']}"
         )
         print(f"bytes:   before={summary['bytes_before']}  after={summary['bytes_after']}  modes={summary['by_mode']}")
+        rate = summary["recovery_rate"]
+        print(
+            f"reads:   {summary['reads']}  shell_enforced_spilled: {summary['shell_enforced_spilled']}  "
+            f"recovered: {summary['shell_enforced_recovered']}  "
+            f"recovery_rate: {'n/a' if rate is None else format(rate, '.1%')}  sources={summary['by_source']}"
+        )
         if summary["latency_us"]:
             lu = summary["latency_us"]
             print(f"latency: n={lu['n']}  p50={lu['p50']}us  p95={lu['p95']}us  max={lu['max']}us")
@@ -123,6 +175,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "usage: spillway <command> [options]\n\n"
             "commands:\n"
             "  mcp     Run MCP stdio proxy around a child server (or pass '-- <cmd>' directly)\n"
+            "  run     Run a shell command and budget its output: run [--mode shadow|enforce] [--cap N] -- <cmd>\n"
+            "  read    Print a slice of a stored artifact: read <sha256> [--offset N] [--limit N]\n"
             "  stats   Summarize receipts.jsonl metrics\n"
             "  prune   Enforce retention limits on artifacts/\n"
             "  replay  Run deterministic offline benchmark replay (source checkout)\n"
@@ -138,6 +192,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _cmd_prune(argv[1:])
     if argv[0] == "replay":
         return _cmd_replay(argv[1:])
+    if argv[0] == "run":
+        from .shell import run_main
+        return run_main(argv[1:])
+    if argv[0] == "read":
+        from .shell import read_main
+        return read_main(argv[1:])
     if argv[0] == "mcp":
         from .mcp_proxy import main as mcp_main
         return mcp_main(argv[1:])

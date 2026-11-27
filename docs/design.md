@@ -80,6 +80,8 @@ The budgeting core does no I/O. [`artifacts.py`](../spillway/artifacts.py) is th
 
 The MCP proxy defaults to `shadow` and **fails open**: on any internal error the original result passes through. See [adapters/mcp_proxy](../adapters/mcp_proxy/README.md).
 
+[`shell.py`](../spillway/shell.py) is a second adapter over the same core. `spillway run` budgets one command's merged output as a single text result with the command's exit code, and `spillway read` prints a neutralized `read_slice` window. `run` defaults to `shadow` and fails open as well; like the proxy, only `enforce` stores artifacts. With a terminal on stdin, `run` execs the command and passes through without measuring.
+
 ## Receipt fields
 
 The core (`apply_budget`) writes these fields. Adapters write them to `receipts.jsonl`, and no field contains output content.
@@ -102,7 +104,11 @@ The core (`apply_budget`) writes these fields. Adapters write them to `receipts.
 | `violations_before_failclose` | Violations found before failing closed (normally `[]`) |
 | `policy_error`, `aggregate_bytes`, `aggregate_unsatisfiable` | Batch settlement only |
 
-Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
+Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). `spillway run` writes `source: "shell"` (and `adapter: "shell"`) and is content-free: `error_locations`, `diagnostic_clues` and `violations_before_failclose` are replaced by `error_location_count`, `diagnostic_clue_count` and `violation_count`, and `would_change` is true only when a verified preview carrying the artifact hash was delivered; receipts without `source` are treated as MCP by `spillway stats`. When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
+
+### Read events
+
+`spillway read` appends one content-free line per successful read: `{"event": "read", "ts", "sha256", "offset", "bytes", "source": "shell"}`. It has no `mode` or `original_bytes`, so result summaries skip it. `spillway stats` counts these events and, for enforced shell results with `would_change`, reports `recovery_rate`: the share whose `artifact_sha256` was read in a later line.
 
 ## Review evidence
 
