@@ -162,7 +162,7 @@ It prints one UTF-8-safe slice (default 8,192 bytes, at most 65,536), neutralize
 
 ## Receipts and `spillway stats`
 
-Each tool result writes one JSON line to `receipts.jsonl`. It contains no output content: sizes, SHA-256 hashes, mode, exit code, error locations, note IDs, `verified`, `would_change` and `elapsed_us`. Results from `spillway run` carry `"source": "shell"`; receipts without a `source` (the MCP proxy, older versions) are counted as `mcp`. Each `spillway read` adds a `{"event": "read", ...}` line.
+Each tool result writes one JSON line to `receipts.jsonl`. It contains no output content: sizes, SHA-256 hashes, mode, exit code, `verified`, `would_change`, `elapsed_us` and counts for error locations, diagnostic clues and violations (`error_location_count`, `diagnostic_clue_count`, `violation_count`). Results from `spillway run` carry `"source": "shell"`; receipts without a `source` (the MCP proxy, older versions) are counted as `mcp`. Each `spillway read` adds a `{"event": "read", ...}` line.
 
 ```sh
 spillway stats                       # default: $SPILLWAY_LOG_DIR/receipts.jsonl or ~/.cache/spillway/receipts.jsonl
