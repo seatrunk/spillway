@@ -19,4 +19,6 @@ benchmark-fixtures/
 
 # Spillway runtime output (may contain unredacted tool artifacts)
 artifacts/
-context-budget-guard/
+
+# Real-session replay output (aggregate only, but local to one machine)
+benchmarks/real/results/

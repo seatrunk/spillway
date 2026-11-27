@@ -2,7 +2,7 @@
 
 ![Spillway — less noise, keep the clues. A large tool result becomes a bounded preview with preserved diagnostics and a recoverable artifact.](docs/assets/hero.svg)
 
-[![CI](https://github.com/seatrunk/context-budget-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/seatrunk/context-budget-guard/actions/workflows/ci.yml)
+[![CI](https://github.com/seatrunk/spillway/actions/workflows/ci.yml/badge.svg)](https://github.com/seatrunk/spillway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 ![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
@@ -11,7 +11,7 @@
 
 Think of a dam spillway. Normal flow passes untouched. During a surge the crest height is enforced, and the overflow is diverted to a basin instead of breaking things downstream.
 
-> **Status: experimental (v0.4.0).** The core, the MCP proxy and the Hermes plugin work, are tested, and default to **`shadow`**: they measure and log, and the model sees the original output. **`enforce` is not production-approved.** See [rollout gates](docs/rollout.md) and [project status](docs/project-status.md). Previously named *Context Budget Guard* (`cbg`); see [migration](#migrating-from-context-budget-guard).
+> **Status: experimental (v0.5.0).** The core and the MCP proxy work, are tested, and default to **`shadow`**: they measure and log, and the model sees the original output. **`enforce` is not production-approved.** See [rollout gates](docs/rollout.md) and [project status](docs/project-status.md). Previously named *Context Budget Guard* (`cbg`); see [migration](#migrating-from-context-budget-guard).
 
 **[Why](#why) · [What the model sees](#what-the-model-sees) · [Quick start](#quick-start) · [Configuration](#configuration) · [Recovery](#recovering-spilled-output) · [How it works](#how-it-works) · [Evidence](#evidence) · [Security](#security-and-privacy) · [Development](#development)**
 
@@ -57,12 +57,12 @@ exit code: 101
 Requires Python 3.11+ and nothing else.
 
 ```sh
-git clone https://github.com/seatrunk/context-budget-guard spillway && cd spillway
+git clone https://github.com/seatrunk/spillway spillway && cd spillway
 pip install .            # or: pipx install .   — provides the `spillway` command
 spillway --version
 ```
 
-Or install straight from Git: `pipx install git+https://github.com/seatrunk/context-budget-guard`. Spillway is not published on PyPI.
+Or install straight from Git: `pipx install git+https://github.com/seatrunk/spillway`. Spillway is not published on PyPI.
 
 ### 1. Wrap any MCP server
 
@@ -85,16 +85,7 @@ Put `spillway mcp` in front of the server command in your MCP client configurati
 
 Without installing: `python3 adapters/mcp_proxy/proxy.py [options] -- <server command>`.
 
-### 2. Hermes Agent plugin
-
-```sh
-sh adapters/hermes/install.sh      # copies the plugin and core to ${HERMES_HOME:-~/.hermes}/plugins/spillway
-hermes plugins enable spillway     # then restart Hermes (plugins are discovered once per process)
-```
-
-The plugin uses Hermes's public `transform_tool_result` hook and does not modify Hermes. It is `shadow` by default; set `SPILLWAY_MODE=enforce` in the Hermes environment to cut output. To turn it off, run `hermes plugins disable spillway` or set `SPILLWAY_MODE=off`. Details: [adapters/hermes/README.md](adapters/hermes/README.md).
-
-### 3. Library
+### 2. Library
 
 ```python
 import spillway
@@ -118,22 +109,20 @@ The budgeting core (`limits`, `render`, `notes`, `sanitize`, `facts`, `budget`, 
 
 | Environment variable | CLI flag (`spillway mcp`) | Default | Meaning |
 | --- | --- | --- | --- |
-| `SPILLWAY_MODE` | `--mode` | `shadow` | `off`, `shadow` or `enforce`. An invalid value falls back to `shadow` (Hermes) |
-| `SPILLWAY_LOG_DIR` | `--log-dir` | `~/.cache/spillway` (MCP), `$HERMES_HOME/spillway` (Hermes) | Holds `receipts.jsonl`, `errors.jsonl` and `artifacts/` |
+| `SPILLWAY_MODE` | `--mode` | `shadow` | `off`, `shadow` or `enforce` |
+| `SPILLWAY_LOG_DIR` | `--log-dir` | `~/.cache/spillway` | Holds `receipts.jsonl`, `errors.jsonl` and `artifacts/` |
 | `SPILLWAY_RESULT_CAP` | `--cap` | `16384` | Per-result cap in UTF-8 bytes; the floor is 256 |
-| `SPILLWAY_FRAMING_RESERVE` | — | `512` | Hermes only: bytes left for the wrapper Hermes adds afterwards |
-| `SPILLWAY_WRAP_UNTRUSTED` | `--wrap-untrusted` | off | MCP only: keep the `<untrusted_tool_result>` wrapper in the enforced text |
+| `SPILLWAY_WRAP_UNTRUSTED` | `--wrap-untrusted` | off | Keep the `<untrusted_tool_result>` wrapper in the enforced text |
 | `SPILLWAY_MAX_ARTIFACTS` | `--max-artifacts` | `200` | Retention: maximum number of artifact files (oldest are evicted first) |
 | `SPILLWAY_MAX_ARTIFACT_BYTES` | `--max-artifact-bytes` | `104857600` | Retention: maximum total artifact bytes |
 
-The legacy `CBG_MODE`, `CBG_LOG_DIR`, `CBG_RESULT_CAP`, `CBG_FRAMING_RESERVE` are still read when the matching `SPILLWAY_*` variable is unset or empty.
+The legacy `CBG_MODE`, `CBG_LOG_DIR`, `CBG_RESULT_CAP` are still read when the matching `SPILLWAY_*` variable is unset or empty.
 
 Core defaults (`spillway.Policy`): 16,384 bytes per result; 350 lines for full file reads and 150 for partial reads; notes up to 4,096 bytes each and 8,192 bytes per batch; a floor of 1,024 bytes per row during batch settlement.
 
 ## Recovering spilled output
 
-- **MCP clients:** in `enforce` mode, call the added tool `spillway_read_artifact` with `{"sha256": "<64 hex>", "offset": 0, "limit": 8192}`. Each slice is UTF-8 safe, reports `next_offset` and `eof`, and is neutralized like any other tool output. Slices are requested at up to half the cap and shrunk further if needed, so the response always fits.
-- **Hermes:** the header gives the absolute path, e.g. `artifact path=~/.hermes/spillway/artifacts/<sha256>.txt`. Read it with the agent's normal `read_file` offset/limit.
+In `enforce` mode, call the added tool `spillway_read_artifact` with `{"sha256": "<64 hex>", "offset": 0, "limit": 8192}`. Each slice is UTF-8 safe, reports `next_offset` and `eof`, and is neutralized like any other tool output. Slices are requested at up to half the cap and shrunk further if needed, so the response always fits.
 - **Housekeeping:** `spillway prune --log-dir DIR [--max-artifacts N] [--max-bytes B]` applies the retention limits. Writes also prune automatically.
 
 ## Receipts and `spillway stats`
@@ -142,7 +131,7 @@ Each tool result writes one JSON line to `receipts.jsonl`. It contains no output
 
 ```sh
 spillway stats                       # default: $SPILLWAY_LOG_DIR/receipts.jsonl or ~/.cache/spillway/receipts.jsonl
-spillway stats ~/.hermes/spillway/receipts.jsonl --json
+spillway stats ~/.cache/spillway/receipts.jsonl --json
 ```
 
 ```text
@@ -192,8 +181,7 @@ cmp /tmp/offline-replay.json benchmarks/replay/results/offline-replay.json && ec
 - Directories are created 0700 and files 0600. Writes and reads use `O_NOFOLLOW`; symlinks and non-regular files are refused, and artifact names must be valid SHA-256 hex. None of this protects against other processes running as the same UID.
 - Retention is bounded (200 files / 100 MiB by default). Never point `SPILLWAY_LOG_DIR` inside a repository, and never commit or share `artifacts/` or `*.jsonl`.
 - In `shadow` no artifacts are written. Receipts contain no output content, but they do contain tool names and `file:line` locations.
-- Both adapters **fail open** on internal errors: the original result goes through, and Hermes logs the exception type name to `errors.jsonl`. The verifier **fails closed** on a receipt mismatch.
-- `install.sh` refuses any destination that does not end in `/plugins/spillway` before it runs `rm -rf`.
+- The MCP proxy **fails open** on internal errors: the original result goes through. The verifier **fails closed** on a receipt mismatch.
 
 Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
 
@@ -202,10 +190,10 @@ Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
 | Path | Contents |
 | --- | --- |
 | [`spillway/`](spillway/__init__.py) | Pure core (`limits`, `render`, `notes`, `sanitize`, `facts`, `budget`, `verify`), plus `artifacts` (I/O), `mcp_proxy` and `cli` |
-| [`adapters/hermes/`](adapters/hermes/README.md) | Hermes plugin (`spillway/__init__.py`, `plugin.yaml`) and `install.sh` |
 | [`adapters/mcp_proxy/`](adapters/mcp_proxy/README.md) | Source-checkout shim for `spillway mcp` |
 | [`benchmarks/replay/`](benchmarks/replay/README.md) | Offline three-arm replay, fixtures and committed results |
-| [`tests/`](tests/) | Unit, invariant, property, adapter and CLI tests (stdlib `unittest`) |
+| [`benchmarks/real/`](benchmarks/real/README.md) | Local real-session replay over your own agent transcripts; writes aggregate numbers only |
+| [`tests/`](tests/) | Unit, invariant, property, MCP proxy and CLI tests (stdlib `unittest`) |
 | [`docs/`](docs/design.md) | Design, note model, benchmarking, rollout, status and historical reviews |
 
 ## Development
@@ -223,9 +211,10 @@ Standard library only, with no dev dependencies. CI runs all of the above, plus 
 
 ![Promotion roadmap from invariants through isolated build, repair, replay, real-task evaluation and controlled rollout.](docs/assets/roadmap.svg)
 
-- **Done:** the pure core, both adapters, offline replay, artifact recovery and packaging (v0.3.0 to v0.4.0).
+- **Done:** the pure core, the MCP proxy, offline replay, artifact recovery, packaging, and a local real-session replay (v0.3.0 to v0.5.0).
+- **Target stack:** T3 Code driving Claude Code, Codex and Antigravity (`agy`), plus OpenBot. Today the MCP proxy covers MCP tool servers, and the real-session replay measures the core against those harnesses' local transcripts. There is no native hook for them yet.
 - **Next:** the real-task benchmark. Run in shadow, then paired A/B enforce runs comparing task success, tokens and cost, recovery reads and fidelity regressions. Protocol: [docs/multi-codebase-evaluation.md](docs/multi-codebase-evaluation.md).
-- **Separate track:** a private native Hermes patch whose combined acceptance gate is still **blocked**. Its history is kept in [docs/project-status.md](docs/project-status.md) and [docs/reviews/](docs/reviews/2026-11-04-combined-assessment.md), and none of it is shipped here.
+- **Retired:** the Hermes plugin and the private native-runtime track were dropped in v0.5.0. Their review history stays in [docs/reviews/](docs/reviews/2026-11-04-combined-assessment.md) as a record.
 - **Production `enforce`:** gated by [docs/rollout.md](docs/rollout.md).
 
 The [operating skill](SKILL.md) describes how to review output-budget evidence. The [visual guide](docs/visual-guide.html) collects the diagrams.
@@ -237,10 +226,9 @@ The [operating skill](SKILL.md) describes how to review output-budget evidence. 
 | `import cbg` | `import spillway` |
 | `[cbg preview] original N bytes, M linhas; …` | `[spillway preview] original N bytes, M lines; …` |
 | `CBG_MODE`, `CBG_LOG_DIR`, … | `SPILLWAY_MODE`, `SPILLWAY_LOG_DIR`, … (`CBG_*` still read as fallback) |
-| `~/.hermes/plugins/context-budget-guard` | `~/.hermes/plugins/spillway` |
 | `python3 adapters/mcp_proxy/proxy.py …` | `spillway mcp …` (the old path still works from a checkout) |
 
-The full list is in the [CHANGELOG](CHANGELOG.md#040--2026-11-18). The GitHub repository URL is unchanged for now.
+The full list is in the [CHANGELOG](CHANGELOG.md#040--2026-11-18). The Hermes plugin that 0.3.x and 0.4.x shipped is removed in 0.5.0.
 
 ## License
 

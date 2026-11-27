@@ -1,10 +1,10 @@
 # Security policy
 
-This repository ships the Spillway package (`spillway/`: pure budgeting core, artifact store, MCP stdio proxy and CLI), a Hermes plugin, documentation and benchmark tooling. It does not ship the separate native runtime prototype. No supported runtime release or security audit is claimed. A passing test suite does not establish a security guarantee.
+This repository ships the Spillway package (`spillway/`: pure budgeting core, artifact store, MCP stdio proxy and CLI), documentation and benchmark tooling. No supported runtime release or security audit is claimed. A passing test suite does not establish a security guarantee.
 
 ## Report privately
 
-Do not put credentials, private transcripts, profile contents, session identifiers, or exploitable private details into public issues or PRs. Report privately through GitHub's [Report a vulnerability](https://github.com/seatrunk/context-budget-guard/security/advisories/new) form (private vulnerability reporting is enabled for this repository). If the form is unavailable, ask a maintainer for a private channel without posting the sensitive details.
+Do not put credentials, private transcripts, profile contents, session identifiers, or exploitable private details into public issues or PRs. Report privately through GitHub's [Report a vulnerability](https://github.com/seatrunk/spillway/security/advisories/new) form (private vulnerability reporting is enabled for this repository). If the form is unavailable, ask a maintainer for a private channel without posting the sensitive details.
 
 Include the affected revision, a synthetic reproduction, expected boundary, and impact. Share the minimum evidence needed. Do not upload raw logs merely because an artifact is marked private. Remediation is coordinated privately before public disclosure.
 
@@ -21,4 +21,4 @@ If you get no acknowledgement within that window, post a public issue that only 
 
 Spillway reduces model-visible tool text. It is not a sandbox, a total token/money cap, or protection against an attacker running under the same operating-system UID. In `enforce` mode it stores complete, **unredacted** originals in `artifacts/` (0600 files, 0700 directories, `O_NOFOLLOW`, bounded retention); it performs no redaction, and its access control has not been independently audited. “Private” is a requirement, not proof of confidentiality.
 
-The [known correctness blocker](docs/project-status.md) is not a claim of a security finding. Report any distinct security issue privately. See [design](docs/design.md) and [rollout](docs/rollout.md) for proposed safeguards.
+The open correctness items in [project status](docs/project-status.md) are not claims of a security finding. Report any distinct security issue privately. See [design](docs/design.md) and [rollout](docs/rollout.md) for proposed safeguards.

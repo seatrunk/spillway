@@ -1,6 +1,6 @@
 # Design
 
-This page describes what the `spillway/` core implements (v0.4.0) and the invariants its tests enforce. A separate private native Hermes patch aims at the same contract, but that patch is **not** part of this repository and is not proven by these tests; see [project status](project-status.md).
+This page describes what the `spillway/` core implements (v0.5.0) and the invariants its tests enforce. See [project status](project-status.md) for what is and is not established.
 
 ## Goals and non-goals
 
@@ -29,7 +29,7 @@ Mandatory control rows (`control=True`) are never capped. A valid one-use approv
 - **Text:** `<untrusted_tool_result>\n{body}\n</untrusted_tool_result>`, followed by an optional `\n[spillway notes]\n[note:ID] …` suffix outside the wrapper.
 - **Multimodal:** a JSON list of parts. The wrapped body goes in the first text part, media parts keep their original order, and notes go in a final text part. Size is measured on the compact JSON with media replaced by a fixed placeholder, so JSON escaping of control characters is counted.
 
-Adapters whose host adds its own framing (Hermes, and MCP by default) deliver `Rendered.unwrapped_payload()`. That form is never larger than what was measured.
+Adapters whose host adds its own framing (the MCP proxy by default) deliver `Rendered.unwrapped_payload()`. That form is never larger than what was measured.
 
 ## Facts that survive any cut
 
@@ -78,7 +78,7 @@ The budgeting core does no I/O. [`artifacts.py`](../spillway/artifacts.py) is th
 - Retention by count and total bytes (default 200 files / 100 MiB). The oldest files go first, and the file just written is never evicted.
 - `read_slice(sha256, offset, limit)` seeks and reads only the requested window. It returns UTF-8-safe text with `next_offset` and `eof`, and every call makes progress even when `limit` is smaller than one code point.
 
-Both adapters default to `shadow` and **fail open**: on any internal error the original result passes through. See [adapters/hermes](../adapters/hermes/README.md) and [adapters/mcp_proxy](../adapters/mcp_proxy/README.md).
+The MCP proxy defaults to `shadow` and **fails open**: on any internal error the original result passes through. See [adapters/mcp_proxy](../adapters/mcp_proxy/README.md).
 
 ## Receipt fields
 
@@ -102,7 +102,7 @@ The core (`apply_budget`) writes these fields. Adapters write them to `receipts.
 | `violations_before_failclose` | Violations found before failing closed (normally `[]`) |
 | `policy_error`, `aggregate_bytes`, `aggregate_unsatisfiable` | Batch settlement only |
 
-Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and also `session_id` (Hermes) or `is_error` (MCP). When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
+Adapter fields: `ts`, `tool`, `adapter`, `adapter_mode`, `elapsed_us`, `would_change` (the mode is neither `full` nor `control`), and `is_error` (MCP). When the MCP proxy drops `structuredContent` it writes an extra `{"call_id", "structured_content_dropped": true}` line.
 
 ## Review evidence
 

@@ -1,12 +1,12 @@
 # Multi-codebase evaluation protocol
 
-**Proposal only. No replay harness or new benchmark results are delivered by this document.** Design: [#10](https://github.com/seatrunk/context-budget-guard/issues/10). Implementation/execution: [#11](https://github.com/seatrunk/context-budget-guard/issues/11).
+**Proposal only. No replay harness or new benchmark results are delivered by this document.** Design: [#10](https://github.com/seatrunk/spillway/issues/10). Implementation/execution: [#11](https://github.com/seatrunk/spillway/issues/11).
 
 ## What is being evaluated?
 
 Evaluate the separate runtime guard's admission, output previews, artifact recovery, and final model-visible tool messages. Do not call a smaller output a successful result if it loses the diagnostic, grant, note, media, or trust boundary needed by the task.
 
-Conversation compaction is a separate layer: Hermes documents independent history-compression mechanisms.[1] A later experiment can study their interaction, but must not attribute summary quality, provider compression, or prompt-cache behavior solely to this operating skill. The skill is procedure; the runtime performs enforcement.
+Conversation compaction is a separate layer: the agent harnesses ship their own history-compression mechanisms.[1] A later experiment can study their interaction, but must not attribute summary quality, provider compression, or prompt-cache behavior solely to this operating skill. The skill is procedure; the runtime performs enforcement.
 
 ## Stage 0 — Correctness characterization now
 
@@ -79,5 +79,5 @@ A future replay schema should include corpus/fixture hashes, runtime and configu
 
 ## Sources
 
-[1] https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching — Hermes context compression and caching
+[1] Each harness documents its own context-compaction behavior (Claude Code, Codex, Antigravity); consult the current vendor documentation.
 [2] https://www.swebench.com/SWE-bench/guides/evaluation — SWE-bench evaluation guide

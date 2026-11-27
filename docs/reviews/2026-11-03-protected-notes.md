@@ -1,5 +1,7 @@
 # Protected-note cycle: passing suites, rejecting review
 
+> **Historical record (retired in v0.5.0).** This review concerns a private native-runtime candidate that is no longer a project target. It is kept as evidence only and does not describe the current `spillway` code. See [project status](../project-status.md).
+
 **Review date: November 3, 2026. Verdict: REJECT. Activation remains BLOCKED.**
 
 This report summarizes a separate, isolated native candidate. This repository does not include or install that runtime. It publishes a privacy-reviewed evidence summary, not the native patch, complete probe source, or private logs. Those omissions limit independent reproduction from this repository alone.
@@ -44,7 +46,7 @@ Separate-candidate path: `agent/context_budget_finalization.py`, corrective comp
 
 The fallback wraps the body with the full 16,384-byte allowance, then appends the note without remeasuring complete rendered bytes. A bounded 4,015-byte note, an image, exit code 7, and eight admitted status fields containing 255 escaped control characters each produced **17,108 measured bytes**. A deliberately non-progressing aggregate implementation exercises the intended corrective fallback under a feasible **200,000-character aggregate budget**. The string control passed. This probe targets corrective fallback, not the ordinary multimodal path.
 
-The permanent corrective test used ASCII status values and missed multimodal JSON-escaping overhead. Track the fix in [#6](https://github.com/seatrunk/context-budget-guard/issues/6). This also prevents closing the ceiling-related acceptance criteria in #1, #3, and #4.
+The permanent corrective test used ASCII status values and missed multimodal JSON-escaping overhead. Track the fix in [#6](https://github.com/seatrunk/spillway/issues/6). This also prevents closing the ceiling-related acceptance criteria in #1, #3, and #4.
 
 ### F2 — Finalization re-limits an already-approved note-bearing read (P2)
 
@@ -52,7 +54,7 @@ Separate-candidate paths: `agent/context_budget_note_policy.py` and `agent/conte
 
 Finalization re-limits an already-approved note-bearing read after its one-use receipt was consumed. A real sequential read with a **65,536-byte receipt** committed its complete synthetic 351-line output plus note at **21,448 characters**. Finalization under a nonbinding **200,000-character aggregate budget** replaced it with a **1,494-character archive notice**. The otherwise identical no-note control retained the complete body. Note preparation unnecessarily re-limited the unchanged row; the requirement is to preserve the approved output, not to retain or replay the consumed receipt.
 
-The permanent receipt-with-note test exercised limiter consumption without finalization. Track the full-lifecycle regression and fix in [#7](https://github.com/seatrunk/context-budget-guard/issues/7).
+The permanent receipt-with-note test exercised limiter consumption without finalization. Track the full-lifecycle regression and fix in [#7](https://github.com/seatrunk/spillway/issues/7).
 
 ### F3 — Delimiters inside actual notes remain literal (P2)
 
@@ -60,11 +62,11 @@ Separate-candidate path: `agent/context_budget_note_policy.py`, note redaction/n
 
 A queued note containing `</untrusted_tool_result>` remained literal after real commit/finalization, producing two closing delimiters for both strings and multimodal content. The permanent XML test put the literal in the **tool body**, not in the **note**. It therefore tested a different input boundary.
 
-Track sanitization and correctly sourced fixtures in [#8](https://github.com/seatrunk/context-budget-guard/issues/8). This is a framing/acceptance defect, not a demonstrated operating-system boundary escape or a security advisory.
+Track sanitization and correctly sourced fixtures in [#8](https://github.com/seatrunk/spillway/issues/8). This is a framing/acceptance defect, not a demonstrated operating-system boundary escape or a security advisory.
 
 ## Nonblocking observation and ruled-out suspicion
 
-Ten separately finalized control-only rows retained ten delivered ownership entries. [#9](https://github.com/seatrunk/context-budget-guard/issues/9) requests a bounded lifecycle decision without dropping genuinely pending segmented notes. Review did not classify this deliberate ownership choice as another proven plan violation.
+Ten separately finalized control-only rows retained ten delivered ownership entries. [#9](https://github.com/seatrunk/spillway/issues/9) requests a bounded lifecycle decision without dropping genuinely pending segmented notes. Review did not classify this deliberate ownership choice as another proven plan violation.
 
 A separate suspicion that a shortened fallback marker exceeded the cap was not reproduced with the sampled legal archive paths. It is not counted as a blocker. The confirmed F1 corrective path is distinct.
 

@@ -2,6 +2,29 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/); while the major version is 0, minor versions may change the model-visible contract.
 
+## [0.5.0] — 2026-11-26
+
+Spillway is re-targeted to the current stack: T3 Code driving Claude Code, Codex and Antigravity (`agy`), plus OpenBot. The Hermes runtime is no longer used, so its adapter and its private native-runtime track are retired. The pure core and the MCP proxy are unchanged: model-visible output is byte-for-byte what 0.4.0 produced, and the offline replay result is identical.
+
+### Breaking changes
+
+- **Hermes plugin removed:** `adapters/hermes/` (the `transform_tool_result` plugin, `plugin.yaml` and `install.sh`), its tests and its documentation are gone. Anything that installed the plugin must stop using it; there is no replacement for Hermes.
+- **`SPILLWAY_FRAMING_RESERVE` and `CBG_FRAMING_RESERVE` removed:** only the Hermes plugin read them. `SPILLWAY_INSTALL_DEST` and `CBG_INSTALL_DEST` went with `install.sh`.
+
+### Added
+
+- **Real-session replay (`benchmarks/real/real_replay.py`):** a stdlib-only local script that reads Claude Code, Codex and Antigravity transcripts on the machine, extracts shell and file-read tool results with their exit code when the harness records one, runs `none`, `truncate` and `spillway` arms at the same byte cap, and scores bytes, exit-code survival and up to 5 `file:line` locations. It prints and writes aggregate numbers only; `assert_aggregate_only` rejects any other value, and `tests/test_real_replay.py` proves the report holds no raw content. Output goes to `benchmarks/real/results/`, which is git-ignored.
+- **Repository check:** `scripts/check_repo.py` fails if `adapters/hermes` comes back.
+
+### Fixed
+
+- **Rename leftovers:** the CI badge, clone and install URLs, security-advisory link and issue links pointed at `seatrunk/context-budget-guard`. They now point at `seatrunk/spillway`. The hero illustration and the visual guide no longer mention Hermes.
+
+### Changed
+
+- Documentation (README, design, rollout, project status, contributing, security, the operating skill) no longer refers to Hermes as a target. The review records under `docs/reviews/` are kept as history with a banner saying they concern a retired candidate.
+- Version consistency in `scripts/check_repo.py` now covers `pyproject.toml`, `spillway/__init__.py` and this file.
+
 ## [0.4.0] — 2026-11-18
 
 The project is renamed from **Context Budget Guard** (`cbg`) to **Spillway** (`spillway`). The core rules have not changed: it measures the final rendered bytes, keeps the diagnostic facts, checks the result with an independent verifier and fails closed. This release fixes the budgeting bugs found in the 0.3.0 review and makes spilled output recoverable.
@@ -59,5 +82,6 @@ The project is renamed from **Context Budget Guard** (`cbg`) to **Spillway** (`s
 
 Stage 1 (PR #14): a pure, dependency-free `cbg/` core (limits, render, notes, sanitize, facts, budget, verify), a Hermes `transform_tool_result` plugin and an MCP stdio proxy, both in `shadow` by default, plus a deterministic offline replay (10 cases, candidate 39/39). Later commits made all public documentation and code comments English and added `install.sh` guards, gitleaks and zizmor to CI.
 
-[0.4.0]: https://github.com/seatrunk/context-budget-guard/compare/dd8bc4b...HEAD
-[0.3.0]: https://github.com/seatrunk/context-budget-guard/commit/de61160
+[0.5.0]: https://github.com/seatrunk/spillway/compare/2fabaeb...HEAD
+[0.4.0]: https://github.com/seatrunk/spillway/compare/dd8bc4b...2fabaeb
+[0.3.0]: https://github.com/seatrunk/spillway/commit/de61160
